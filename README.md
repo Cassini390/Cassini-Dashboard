@@ -130,3 +130,9 @@ add a decoder to `DECODERS` in `public/n2k.js`.
 - `sim.js` – demo simulator (N2K ASCII generator)
 - `public/n2k.js` – N2K ASCII parser and PGN decoders
 - `public/app.js`, `styles.css`, `index.html` – the dashboard
+
+## Licence
+
+Released under the [MIT Licence](LICENSE). Third-party components and map data are credited in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). "Actisense" and the Actisense logo are trademarks of
+Active Research Limited and are not covered by the MIT licence.
