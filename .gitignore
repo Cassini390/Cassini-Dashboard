@@ -1,0 +1,8 @@
+# local settings and data (never commit: contain your gateway address and vessel data)
+config.json
+prefs.json
+history.json
+
+# build output (publish via Releases instead)
+dist/
+node_modules/
