@@ -83,7 +83,7 @@ h2, h3 { margin: 0; }
 .tabs { display: flex; gap: 4px; padding: 0 16px; background: var(--card); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .tabs button { border: 0; background: none; padding: 13px 14px 11px; font-weight: 500; color: var(--text-2); border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
 .tabs button:hover { color: var(--text); }
-.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 700; }
+.tabs button[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 700; }
 .banner { margin: 16px 20px 0; padding: 10px 14px; border-radius: 10px; background: color-mix(in srgb, var(--ngx-blue) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--ngx-blue) 40%, var(--card)); font-size: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .banner[hidden] { display: none; }
 .banner button { margin-left: auto; }
@@ -433,7 +433,7 @@ body { display: grid; grid-template-columns: 264px minmax(0, 1fr); align-items: 
 .tabs button { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 9px 10px; min-height: 44px; border-radius: 9px; border-bottom: 0; font-size: 16px; }
 .tabs button svg { width: 21px; height: 21px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tabs button:hover { background: var(--card-2); }
-.tabs button[aria-selected="true"] { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 13%, transparent); font-weight: 700; }
+.tabs button[aria-current="page"] { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 13%, transparent); font-weight: 700; }
 .nav-group { font-size: 13px; font-weight: 500; color: var(--text-3); padding: 14px 10px 4px; }
 .nav-group:first-child { padding-top: 0; }
 .topbar { background: var(--card); color: var(--text); border-bottom: 1px solid var(--line); padding: 10px 20px; }
@@ -476,3 +476,51 @@ body { display: grid; grid-template-columns: 264px minmax(0, 1fr); align-items: 
 .thr-label { position: absolute; left: 4px; transform: translateY(-110%); font-size: 12px; font-weight: 700; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--card) 85%, transparent); white-space: nowrap; }
 .thr-label.crit { color: var(--crit); } .thr-label.warn { color: var(--warn); }
 .card > .ranges { align-self: flex-start; }
+
+/* ================================================================== bundled Roboto (no internet needed) - Apache License 2.0 */
+@font-face { font-family: "Roboto"; font-style: normal; font-weight: 100 900; font-display: swap; src: url(vendor/fonts/roboto-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Roboto"; font-style: normal; font-weight: 100 900; font-display: swap; src: url(vendor/fonts/roboto-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+
+/* ================================================================== design-review pass 2 */
+/* gauges: neutral arc; colour only when the value is in a warning zone */
+.gauge .g-val { stroke: var(--data); }
+.gauge .g-zone { stroke-width: 4; }
+/* compass numerals stay upright (counter-rotated in step with the card) */
+.dial .up { transition: transform .25s linear; transform-origin: 100px 30px; }
+/* wind dial: P / S letters so port and starboard are not colour-only */
+.dial .side { font-size: 13px; font-weight: 700; text-anchor: middle; }
+.dial .side-p { fill: var(--port); } .dial .side-s { fill: var(--stbd); }
+.dial .hull { opacity: .7; }
+/* chart value labels sit in their own gutter instead of over the line */
+.spark-plot svg { width: calc(100% - 52px); }
+.spark-plot .thr-labels { right: 52px; }
+.spark .hi, .spark .lo { background: none; padding: 0; width: 48px; text-align: right; }
+/* long single values shrink to fit their panel */
+.pv { font-size: min(58cqh, calc(118cqw / var(--len, 4))); }
+/* engines page: cards share the width instead of leaving half the screen empty */
+.cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); }
+.charts2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.charts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+.chart-box { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.chart-box .label { font-size: 13.5px; color: var(--text-2); }
+.chart-box .label span { font-weight: 700; color: var(--text); }
+/* names editor, small header checkbox, log filter */
+.names { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px 24px; }
+.name-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 1fr); gap: 12px; align-items: center; }
+.h-check { display: inline-flex; align-items: center; gap: 8px; font: 500 14px var(--font-body); letter-spacing: 0; text-transform: none; color: var(--text-2); cursor: pointer; min-height: 30px; }
+.h-check input { width: 20px; height: 20px; accent-color: var(--orange-fill); }
+.card > input[type=text] { width: 100%; }
+/* AIS */
+.ais-mark { background: none; border: 0; }
+.ais-mark svg { width: 22px; height: 22px; display: block; transition: transform .4s linear; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45)); }
+.ais-mark path { fill: #3399ff; stroke: #05223d; stroke-width: 1.4; stroke-linejoin: round; }
+td.close { color: var(--crit); font-weight: 700; }
+main:focus { outline: none; }
+.gauge .g-label { font-size: 10px; letter-spacing: .03em; }
+.gauge .g-lim { font-size: 10px; }
+.spark-axis { flex-wrap: nowrap; }
+.axis-t { white-space: nowrap; min-width: 38px; }
+.ranges { flex-wrap: nowrap; }
+.chart-box .ranges button, .charts2 .ranges button { padding: 4px 8px; min-height: 32px; font-size: 13.5px; }

@@ -45,6 +45,13 @@ const DEVICES = [
   { src: SRC.tank, mfr: 137, fn: 150, cls: 75, model: 'Tank level adapter', sw: '1.3', code: 1007 },
   { src: SRC.sw, mfr: 137, fn: 135, cls: 30, model: 'Switch bank', sw: '2.0', code: 1008 },
 ];
+// other vessels, reported as AIS targets
+const AIS = [
+  { mmsi: 235000101, cls: 'A', name: 'NORTHERN LIGHT', callsign: 'MXYZ1', type: 70, len: 118, beam: 18, dest: 'POOLE', lat: 50.662, lon: -1.905, cog: 320, sog: 9.5 },
+  { mmsi: 235000202, cls: 'A', name: 'HARBOUR PILOT 2', callsign: 'MXYZ2', type: 50, len: 16, beam: 5, dest: 'POOLE BAR', lat: 50.690, lon: -1.920, cog: 140, sog: 14 },
+  { mmsi: 235000303, cls: 'A', name: 'SEA SPRAY', callsign: 'MXYZ3', type: 60, len: 42, beam: 9, dest: 'SWANAGE', lat: 50.650, lon: -1.940, cog: 30, sog: 6 },
+  { mmsi: 235000404, cls: 'B', name: 'KITTIWAKE', callsign: 'MXYZ4', type: 36, len: 11, beam: 4, lat: 50.674, lon: -1.890, cog: 250, sog: 5.2 },
+];
 const WAYPOINTS = [{ lat: 50.6425, lon: -1.9120 }, { lat: 50.6860, lon: -1.9350 }, { lat: 50.6700, lon: -1.8700 }];
 
 class Simulator {
@@ -75,7 +82,27 @@ class Simulator {
   }
   stop() { this.timers.forEach(clearInterval); this.timers = []; }
 
+  aisStatic() {
+    for (const a of AIS) {
+      if (a.cls === 'A') this.line(SRC.gw, 129794, 6, w().u8(5).u32(a.mmsi).u32(null).str(a.callsign, 7).str(a.name, 20).u8(a.type).u16(a.len * 10).u16(a.beam * 10).u16(null).u16(null)
+        .u16(null).u32(null).u16(null).str(a.dest || '', 20).u8(null).u8(null));
+      else { this.line(SRC.gw, 129809, 6, w().u8(24).u32(a.mmsi).str(a.name, 20).u8(null).u8(null));
+        this.line(SRC.gw, 129810, 6, w().u8(24).u32(a.mmsi).u8(a.type).str('', 7).str(a.callsign, 7).u16(a.len * 10).u16(a.beam * 10).u16(null).u16(null).u32(null).u8(null).u8(null).u8(null)); }
+    }
+  }
+  aisPositions(dt) {
+    for (const a of AIS) {
+      a.cog = wrap(a.cog + noise(1.5));
+      a.lat += (a.sog * KN * Math.cos(a.cog * RAD) * dt) / 111320;
+      a.lon += (a.sog * KN * Math.sin(a.cog * RAD) * dt) / (111320 * Math.cos(a.lat * RAD));
+      if (Math.abs(a.lat - 50.67) > 0.06 || Math.abs(a.lon + 1.91) > 0.09) a.cog = wrap(a.cog + 180);   // stay in the area
+      const p = w().u8(a.cls === 'A' ? 1 : 18).u32(a.mmsi).s32(a.lon * 1e7).s32(a.lat * 1e7).u8(0xF0).u16((a.cog * RAD) / 1e-4).u16((a.sog * KN) / 0.01).u24(0).u16((a.cog * RAD) / 1e-4);
+      this.line(SRC.gw, a.cls === 'A' ? 129038 : 129039, 4, a.cls === 'A' ? p.s16(null).u8(0xF0).u8(null).u8(null) : p.u8(null).u8(null).u8(null).u8(null));
+    }
+  }
+
   identify() {
+    this.aisStatic();
     DEVICES.forEach((d, i) => {
       this.line(d.src, 60928, 6, w().u32(((1000 + i) | (d.mfr << 21)) >>> 0).u8(0).u8(d.fn).u8(d.cls << 1).u8(0xC0));
       this.line(d.src, 126996, 6, w().u16(2100).u16(d.code).str(d.model, 32).str(d.sw, 32).str('A', 32).str(String(240000 + i), 32).u8(1).u8(1));
@@ -176,6 +203,7 @@ class Simulator {
   }
 
   verySlow() {
+    this.aisPositions(2.5);
     const tanks = [[0, 0, this.fuel[0], 400], [1, 0, this.fuel[1], 400], [0, 1, 62, 300], [0, 2, 34, 120], [0, 5, 47, 100]];
     tanks.forEach(([inst, type, lvl, cap]) => this.line(SRC.tank, 127505, 6, w().u8((type << 4) | inst).s16(lvl / 0.004).u32(cap * 10).u8(null)));
     // switch bank 0: channels 1,2,5 on, 3,4,6-8 off, rest not available

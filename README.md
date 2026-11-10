@@ -74,12 +74,12 @@ reconnects automatically.
 |---|---|
 | Overview | Compass, SOG, depth + history, wind, position, alerts, engines, batteries, tanks, environment |
 | My Dashboard | Your own layout: add any panels (instruments, chart, single values, gauges, history graphs, lists), drag to move, drag the corner to resize; saved in the browser |
-| Navigation | Heading/COG/ROT, own-ship track plot, GNSS quality, waypoint (DTW, BTW, XTE, VMG, ETA), roll/pitch/rudder, depth & speed history |
+| Navigation | AIS targets (list with range, bearing, CPA and time to CPA, and markers on the chart), heading/COG/ROT, own-ship track plot, GNSS quality, waypoint (DTW, BTW, XTE, VMG, ETA), roll/pitch/rudder, depth & speed history |
 | Engines | Per engine: RPM, coolant, oil pressure, load, fuel rate, alternator, boost, gearbox, hours, warning flags |
 | Power & Tanks | Per battery: voltage, current, power, SOC, temperature, time remaining; tank levels; switch bank status |
 | Environment | Apparent & true wind (true is calculated if not on the network), barometer + trend, temperatures, humidity |
 | Alarms | Active alarms; enable/disable each alarm, set its trigger threshold and severity; optional sound on new critical alarms |
-| Sources | Choose which source address to prioritise when several devices send the same data (automatic fail-over if it stops) |
+| Sources | Choose which source address to prioritise when several devices send the same data (automatic fail-over if it stops); custom names for engines, batteries and tanks |
 | Network | Gateway status (W2K-2 REST API), devices on the bus, PGN traffic table, raw N2K ASCII log |
 
 - **Themes:** light, dark and a red-only **night** mode, plus a brightness control (per device).
@@ -93,13 +93,18 @@ reconnects automatically.
   buttons and draw the matching alarm thresholds as dashed lines; the Track history card loads the stored
   track and draws it on the chart. History is cleared when the data source changes, and is not recorded
   for a browser using the direct WebSocket source unless the bridge is also connected to the gateway.
+- **Map tiles:** the bridge fetches each map tile once and keeps it in `tile-cache/`, so areas you have
+  already viewed keep working with no internet. Only viewed tiles are stored. Settings > Map tiles accepts another
+  provider's tile address and credit if you do not want to use OpenStreetMap. The cache folder is safe to delete.
+- **AIS:** PGNs 129038, 129039, 129794, 129809 and 129810 are decoded from the public PGN definitions and have
+  only been checked against the built-in simulator, not a real AIS receiver.
 - **Test connection:** Settings can test a TCP/UDP source and says plainly what is wrong.
 
 ### Decoded PGNs
 
 60928, 126992, 126996, 127245, 127250, 127251, 127257, 127258, 127488, 127489,
 127493, 127501, 127505, 127506, 127508, 128259, 128267, 128275, 129025, 129026,
-129029, 129283, 129284, 129539, 129540, 130306, 130310, 130311, 130312, 130313,
+129029, 129038, 129039, 129283, 129284, 129539, 129540, 129794, 129809, 129810, 130306, 130310, 130311, 130312, 130313,
 130314, 130316. Other PGNs are still counted on the Network page. To add one,
 add a decoder to `DECODERS` in `public/n2k.js`.
 
@@ -120,8 +125,7 @@ add a decoder to `DECODERS` in `public/n2k.js`.
   [usage policy](https://operations.osmfoundation.org/policies/tiles/) (no bulk downloading, no guaranteed
   availability); if this is distributed widely, point the tile URL in `public/app.js` at your own or a
   commercial tile service.
-- **Offline use.** Everything else is served locally. Roboto is requested from Google
-  Fonts when internet is available and falls back to the system font otherwise.
+- **Offline use.** Everything else is served locally, including the Roboto font (bundled in `public/vendor/fonts/`).
 - Not a substitute for certified navigation instruments.
 
 ## Files

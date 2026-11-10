@@ -2,6 +2,7 @@
 config.json
 prefs.json
 history.json
+tile-cache/
 
 # build output (publish via Releases instead)
 dist/

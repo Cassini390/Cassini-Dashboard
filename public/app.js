@@ -55,7 +55,7 @@
   const big = (numFn, unitFn, cls = '') => h('div', 'big ' + cls, t('num', numFn), t('unit', typeof unitFn === 'function' ? unitFn : () => unitFn));
 
   // ================================================================ settings & units
-  const DEFAULTS = () => ({ speed: 'kn', depth: 'm', temp: 'c', pressure: 'bar', volume: 'l', theme: 'auto', brightness: 100, sound: false, alarms: {}, sources: {} });
+  const DEFAULTS = () => ({ speed: 'kn', depth: 'm', temp: 'c', pressure: 'bar', volume: 'l', theme: 'auto', brightness: 100, sound: false, alarms: {}, sources: {}, names: {}, tiles: {}, depthRef: 'offset' });
   const settings = Object.assign(DEFAULTS(),
     (() => { try { return JSON.parse(localStorage.getItem('w2k.settings')) || {}; } catch { return {}; } })());
   // Per-device settings stay in this browser; everything else (units, alarms, source priority, dashboard layout)
@@ -78,6 +78,8 @@
     for (const k of Object.keys(p)) if (!DEVICE_KEYS.includes(k)) settings[k] = p[k];
     if (typeof settings.alarms !== 'object' || !settings.alarms) settings.alarms = {};
     if (typeof settings.sources !== 'object' || !settings.sources) settings.sources = {};
+    if (typeof settings.names !== 'object' || !settings.names) settings.names = {};
+    if (typeof settings.tiles !== 'object' || !settings.tiles) settings.tiles = {};
     saveLocal(); alertAt = 0; buildPages();
   }
   const UNITS = {
@@ -105,6 +107,14 @@
   function fDur(min) { if (min == null) return '—'; const hh = Math.floor(min / 60); return hh >= 48 ? `${Math.round(hh / 24)} d` : `${hh} h ${String(Math.round(min % 60)).padStart(2, '0')} m`; }
 
   // ================================================================ live value store
+  let aisTargets = new Map();   // mmsi -> { mmsi, cls, name, lat, lon, cog, sog, hdg, t (last position time), ... }
+  const onAis = (mmsi, f) => {
+    if (mmsi == null) return;
+    const o = aisTargets.get(mmsi) || { mmsi };
+    for (const k in f) if (f[k] != null && f[k] !== '') o[k] = f[k];
+    if (f.lat != null) o.t = Date.now();
+    aisTargets.set(mmsi, o);
+  };
   let boatName = '', trackT = [], trackDist = 0, histTrack = [];   // histTrack: stored track for the range chosen on the Track history card
   let D = {}, H = {}, track = [], pgnStats = new Map(), srcStats = new Map(), rawLog = [], lastRx = 0, badLines = 0, maxSog = 0;
   const SLOW = /^(tank|bat|temp|tempSet|humidity|pressure|switch|eng|log|variation|gnss)\b/;
@@ -144,7 +154,7 @@
     for (const k in D) if (k.startsWith(p) && get(k) != null) out.add(k.slice(p.length).split('.')[0]);
     return [...out].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }
-  function resetData() { D = {}; H = {}; track = []; trackT = []; trackDist = 0; pgnStats = new Map(); srcStats = new Map(); rawLog = []; badLines = 0; maxSog = 0; groupSrcs = new Map(); groupActive = new Map(); }
+  function resetData() { aisTargets = new Map(); D = {}; H = {}; track = []; trackT = []; trackDist = 0; pgnStats = new Map(); srcStats = new Map(); rawLog = []; badLines = 0; maxSog = 0; groupSrcs = new Map(); groupActive = new Map(); }
 
   function ingest(line) {
     const m = N2K.parseLine(line);
@@ -156,7 +166,7 @@
     let ss = srcStats.get(m.src);
     if (!ss) srcStats.set(m.src, (ss = { n: 0, t: 0 }));
     ss.n++; ss.t = lastRx;
-    curSrc = m.src; N2K.decode(m, put); curSrc = null;
+    curSrc = m.src; N2K.decode(m, put, onAis); curSrc = null;
     rawLog.push(line); if (rawLog.length > 300) rawLog.splice(0, 100);
   }
 
@@ -185,16 +195,22 @@
     return { tws, twa, twd, calc };
   }
   const signed = (a) => (a == null ? null : a > 180 ? a - 360 : a);
-  const fSide = (a) => { const v = signed(a); return v == null ? '—' : `${Math.abs(Math.round(v))}° ${v < -0.5 ? 'P' : v > 0.5 ? 'S' : ''}`; };
+  const fSide = (a) => { const v = signed(a); return v == null ? '—' : `${Math.abs(Math.round(v))}° ${v < -0.5 ? 'port' : v > 0.5 ? 'stbd' : ''}`.trim(); };
   const beaufort = (ms) => (ms == null ? '—' : 'F' + [0.3, 1.6, 3.4, 5.5, 8, 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7].filter((x) => ms >= x).length);
 
   // ---- names
-  const engName = (id, all) => (all.length === 1 ? 'Engine' : all.length === 2 && all.join() === '0,1' ? (id === '0' ? 'Port engine' : 'Starboard engine') : `Engine ${+id + 1}`);
-  function tankName(id, all) {
+  // names: a custom name (Sources page) wins over the automatic one
+  const customName = (k) => (settings.names && settings.names[k]) || null;
+  const defEngName = (id, all) => (all.length === 1 ? 'Engine' : all.length === 2 && all.join() === '0,1' ? (id === '0' ? 'Port engine' : 'Starboard engine') : `Engine ${+id + 1}`);
+  const engName = (id, all) => customName(`eng.${id}`) || defEngName(id, all);
+  function defTankName(id, all) {
     const [type, inst] = id.split('-').map(Number), same = all.filter((x) => x.startsWith(type + '-'));
     const base = N2K.TANK_TYPES[type] || `Tank type ${type}`;
     return same.length > 1 ? `${base} ${same.length === 2 && same.join() === `${type}-0,${type}-1` ? (inst === 0 ? '(Port)' : '(Stbd)') : inst + 1}` : base;
   }
+  const tankName = (id, all) => customName(`tank.${id}`) || defTankName(id, all);
+  const defBatName = (id) => 'Battery ' + (+id + 1);
+  const batName = (id) => customName(`bat.${id}`) || defBatName(id);
   const tankClass = (type) => (type === 0 || type === 6 ? 'fuel' : type === 1 || type === 3 ? 'water' : type === 4 ? 'oil' : 'waste');
   function tempName(id) { const [src, inst] = id.split('-').map(Number); return (N2K.TEMP_SOURCES[src] || `Source ${src}`) + (inst ? ` ${inst + 1}` : ''); }
   const batNominal = (v) => (v == null ? 1 : v > 36 ? 4 : v > 18 ? 2 : 1);
@@ -241,9 +257,9 @@
     if (on('gnss') && get('gnss.method') === 'No fix') add('gnss', 'GNSS has no position fix');
     for (const id of ids('bat')) {
       const v = get(`bat.${id}.v`), soc = get(`bat.${id}.soc`), n = batNominal(v);
-      if (v != null && on('batLow') && v < thr('batLow') * n) add('batLow', `Battery ${+id + 1} voltage low: ${v.toFixed(1)} V`);
-      if (v != null && on('batHigh') && v > thr('batHigh') * n) add('batHigh', `Battery ${+id + 1} voltage high: ${v.toFixed(1)} V`);
-      if (soc != null && on('socLow') && soc < thr('socLow')) add('socLow', `Battery ${+id + 1} charge low: ${soc}%`);
+      if (v != null && on('batLow') && v < thr('batLow') * n) add('batLow', `${batName(id)} voltage low: ${v.toFixed(1)} V`);
+      if (v != null && on('batHigh') && v > thr('batHigh') * n) add('batHigh', `${batName(id)} voltage high: ${v.toFixed(1)} V`);
+      if (soc != null && on('socLow') && soc < thr('socLow')) add('socLow', `${batName(id)} charge low: ${soc}%`);
     }
     const engs = ids('eng');
     for (const id of engs) {
@@ -316,18 +332,21 @@
       val.setAttribute('d', v == null ? '' : arc(60, 60, 46, A0, A0 + Math.max(SW * frac(v), 0.5)));
       num.textContent = f(show(v), typeof o.digits === 'function' ? o.digits() : o.digits || 0);
       un.textContent = uTxt;
+      const say = `${o.label}: ${num.textContent} ${uTxt}`; if (el.getAttribute('aria-label') !== say) el.setAttribute('aria-label', say);
     });
     return el;
   }
 
   function compass() {
-    const rose = s('g', 'rot'), cog = s('g', 'rot'), wpt = s('g', 'rot');
+    const rose = s('g', 'rot'), cog = s('g', 'rot'), wpt = s('g', 'rot'), labels = [];
     for (let a = 0; a < 360; a += 5) {
       const major = a % 30 === 0, [x1, y1] = polar(100, 100, 88, a), [x2, y2] = polar(100, 100, major ? 78 : a % 10 === 0 ? 81 : 84, a);
       rose.append(s('line', { class: 'tick' + (major ? ' major' : ''), x1, y1, x2, y2 }));
       if (major) {
         const card = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' }[a];
-        rose.append(s('text', { class: 'lbl' + (a === 0 ? ' card-n' : card ? ' cardinal' : ''), x: 100, y: 34, transform: `rotate(${a} 100 100)`, text: card || a / 10 }));
+        const txt = s('text', { class: 'lbl up' + (a === 0 ? ' card-n' : card ? ' cardinal' : ''), x: 100, y: 34, text: card || a / 10 });
+        labels.push([a, txt]);
+        rose.append(s('g', { transform: `rotate(${a} 100 100)` }, txt));
       }
     }
     cog.append(s('path', { class: 'cog', d: 'M100 3 L107 15 L93 15 Z' }));
@@ -336,14 +355,17 @@
     const el = s('svg', { class: 'dial', viewBox: '0 0 200 200', role: 'img', 'aria-label': 'Compass' },
       s('circle', { class: 'ring', cx: 100, cy: 100, r: 90 }), rose, wpt, cog,
       s('circle', { class: 'hub', cx: 100, cy: 100, r: 44 }), s('path', { class: 'lubber', d: 'M100 22 L105 10 L95 10 Z' }), num, sub);
-    const spin = (g) => { let acc = 0; return (a, vis) => { g.style.display = vis ? '' : 'none'; if (vis) { acc += ((a - acc) % 360 + 540) % 360 - 180; g.style.transform = `rotate(${acc.toFixed(1)}deg)`; } }; };
+    const spin = (g) => { let acc = 0; return (a, vis) => { g.style.display = vis ? '' : 'none'; if (vis) { acc += ((a - acc) % 360 + 540) % 360 - 180; g.style.transform = `rotate(${acc.toFixed(1)}deg)`; } return acc; }; };
     const sRose = spin(rose), sCog = spin(cog), sWpt = spin(wpt);
     reg(() => {
       ageing = false;
       const hd = heading(), c = get('cog'), b = get('nav.btw'), ref = hd.v ?? c;   // fall back to COG-up if no heading sensor
       el.classList.toggle('ageing', ageing);
-      sRose(-(ref ?? 0), true); sCog((c ?? 0) - (ref ?? 0), c != null && ref != null); sWpt((b ?? 0) - (ref ?? 0), b != null && ref != null);
+      const acc = sRose(-(ref ?? 0), true); sCog((c ?? 0) - (ref ?? 0), c != null && ref != null); sWpt((b ?? 0) - (ref ?? 0), b != null && ref != null);
+      for (const [a, txt] of labels) txt.style.transform = `rotate(${(-(acc + a)).toFixed(1)}deg)`;   // counter-rotate so the numerals stay upright
       num.textContent = fdeg(ref); sub.textContent = hd.v != null ? `HDG °${hd.ref}` : c != null ? 'COG °T' : 'HEADING';
+      const say = ref == null ? 'Compass: no heading' : `${hd.v != null ? 'Heading' : 'Course over ground'} ${Math.round(wrap(ref))} degrees ${hd.v != null && hd.ref === 'M' ? 'magnetic' : 'true'}`;
+      if (el.getAttribute('aria-label') !== say) el.setAttribute('aria-label', say);
     });
     return el;
   }
@@ -355,23 +377,31 @@
       g.append(s('line', { class: 'tick' + (major ? ' major' : ''), x1, y1, x2, y2 }));
       if (major && a !== 0) { const [x, y] = polar(100, 100, 70, a); g.append(s('text', { class: 'lbl', x, y: y + 3.5, text: a > 180 ? 360 - a : a })); }
     }
-    aw.append(s('path', { class: 'aw', d: 'M100 18 L109 0 L91 0 Z' }));
-    tw.append(s('path', { class: 'tw', d: 'M100 20 L107 6 L93 6 Z' }));
+    aw.append(s('path', { class: 'aw', d: 'M100 9 L110 -8 L90 -8 Z' }));
+    tw.append(s('path', { class: 'tw', d: 'M100 9 L107 -5 L93 -5 Z' }));
     const num = s('text', { class: 'd-num', x: 100, y: 108 }), sub = s('text', { class: 'd-sub', x: 100, y: 124 });
-    const el = s('svg', { class: 'dial', viewBox: '0 -2 200 204', role: 'img', 'aria-label': 'Wind angle' },
+    const [px, py] = polar(100, 100, 55, -40), [sx, sy] = polar(100, 100, 55, 40);
+    const el = s('svg', { class: 'dial', viewBox: '-10 -10 220 220', role: 'img', 'aria-label': 'Wind' },
       s('circle', { class: 'ring', cx: 100, cy: 100, r: 90 }),
       s('path', { class: 'sector-p', d: arc(100, 100, 91, -60, -20) }), s('path', { class: 'sector-s', d: arc(100, 100, 91, 20, 60) }), g,
-      s('path', { class: 'hull', d: 'M100 40 C122 70 124 120 114 160 L86 160 C76 120 78 70 100 40Z' }), tw, aw, num, sub);
+      s('text', { class: 'side side-p', x: px, y: py + 4, text: 'P' }), s('text', { class: 'side side-s', x: sx, y: sy + 4, text: 'S' }),
+      s('path', { class: 'hull', d: 'M100 36 C124 68 126 122 116 164 L84 164 C74 122 76 68 100 36Z' }),
+      s('circle', { class: 'hub', cx: 100, cy: 104, r: 38 }), tw, aw, num, sub);
     const spin = (grp) => { let acc = 0; return (a) => { grp.style.display = a == null ? 'none' : ''; if (a != null) { acc += ((a - acc) % 360 + 540) % 360 - 180; grp.style.transform = `rotate(${acc.toFixed(1)}deg)`; } }; };
     const sA = spin(aw), sT = spin(tw);
-    reg(() => { ageing = false; const awa = get('wind.awa'); el.classList.toggle('ageing', ageing); sA(awa); sT(trueWind().twa); num.textContent = fSpd(get('wind.aws')); sub.textContent = `AWS ${unit('speed').toUpperCase()}`; });
+    reg(() => {
+      ageing = false; const awa = get('wind.awa'), aws = get('wind.aws'); el.classList.toggle('ageing', ageing);
+      sA(awa); sT(trueWind().twa); num.textContent = fSpd(aws); sub.textContent = `AWS ${unit('speed').toUpperCase()}`;
+      const say = awa == null ? 'Wind: no data' : `Apparent wind ${fSpd(aws)} ${unit('speed')}, ${fSide(awa)}`;
+      if (el.getAttribute('aria-label') !== say) el.setAttribute('aria-label', say);
+    });
     return h('div', null, el, h('div', 'legend', h('span', null, h('i', 'a'), 'Apparent'), h('span', null, h('i', 't'), 'True')));
   }
 
   /** history chart for a store key. "Live" = the last 30 min held in this page; 24 h / 7 d / 30 d come from the bridge's stored history.
    *  o.thr() may return alarm thresholds [{ v, lvl, label }] to draw as dashed lines (o.fit forces them into view). */
   const RANGES = [['live', 'Live'], ['24h', '24 h'], ['7d', '7 d'], ['30d', '30 d']];
-  const fmtAxisTime = (t, spanMs) => (spanMs > 36 * 3600000 ? new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' }) : new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  const fmtAxisTime = (t, spanMs) => (spanMs > 36 * 3600000 ? new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' }) : new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
   function rangeChips(onPick) {
     const el = h('div', 'ranges');
     const pick = (r) => { for (const b of el.children) b.setAttribute('aria-pressed', b.dataset.r === r); onPick(r); };
@@ -412,7 +442,7 @@
       const shown = ths.filter((x) => x.v >= mn && x.v <= mx);
       thrG.replaceChildren(...shown.map((x) => s('path', { class: `thr-line s-${x.lvl}`, d: `M0 ${y(x.v).toFixed(1)}H300` })));
       thrL.replaceChildren(...shown.map((x) => h('span', { class: `thr-label ${x.lvl}`, style: `top:${(y(x.v) / 80 * 100).toFixed(1)}%`, text: `${x.label} ${f(show(x.v), digits)}` })));
-      hi.textContent = f(show(o.invert ? dMin : dMax), digits); lo.textContent = f(show(o.invert ? dMax : dMin), digits);
+      hi.textContent = f(show(o.invert ? dMin : dMax), digits); lo.textContent = f(show(o.invert ? dMax : o.zero ? Math.min(0, dMin) : dMin), digits);
       t0l.textContent = fmtAxisTime(t0, dt); t1l.textContent = range === 'live' ? 'now' : fmtAxisTime(t1, dt);
     });
     return el;
@@ -423,7 +453,7 @@
   const thrBat = (id) => () => { const n = batNominal(get(`bat.${id}.v`)); return [al('batLow').on ? { v: al('batLow').value * n, lvl: 'crit', label: 'Low' } : null, al('batHigh').on ? { v: al('batHigh').value * n, lvl: 'warn', label: 'High' } : null]; };
 
   function trackPlot() {
-    const cv = h('canvas', 'track');
+    const cv = h('canvas', { class: 'track', role: 'img', 'aria-label': 'Offline plot of own ship, recent track and waypoint, north up' });
     let last = 0;
     reg(() => {
       if (Date.now() - last < 900) return; last = Date.now();
@@ -470,7 +500,7 @@
     const mapEl = h('div', 'map'), plot = trackPlot(), note = h('div', { class: 'map-note', hidden: '' });
     const bMap = h('button', { type: 'button', text: 'Map', onclick: () => setView('map') }), bPlot = h('button', { type: 'button', text: 'Offline plot', onclick: () => setView('plot') });
     const centre = h('button', { type: 'button', class: 'btn sm', text: 'Centre on vessel', hidden: '', onclick: () => { follow = true; centre.hidden = true; last = 0; } });
-    let map = null, ship, line, wpt, wptLine, follow = true, fixed = false, lastW = 0, last = 0, loaded = 0, errors = 0;
+    let map = null, aisLayer, aisMarks = new Map(), ship, line, wpt, wptLine, follow = true, fixed = false, lastW = 0, last = 0, loaded = 0, errors = 0;
     function setView(v) {
       settings.navView = v; saveSettings();
       mapEl.hidden = v !== 'map'; plot.hidden = v !== 'plot'; if (v !== 'map') centre.hidden = true; else note.hidden = true;
@@ -483,9 +513,11 @@
       const w = mapEl.clientWidth + mapEl.clientHeight * 10000; if (!mapEl.clientWidth) return;
       if (!map) {
         map = L.map(mapEl, { worldCopyJump: true }).setView([30, 0], 2); leafMaps.push(map);
-        const base = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, className: 'base-tiles',
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(map);
-        L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', { maxZoom: 18,
+        const custom = settings.tiles && /^https:\/\//.test(settings.tiles.url || '') ? settings.tiles : null;
+        const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const base = L.tileLayer(standalone ? (custom ? custom.url : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png') : '/tiles/base/{z}/{x}/{y}', { maxZoom: 19, className: custom ? '' : 'base-tiles',
+          attribution: custom ? esc(custom.attribution || 'Map tiles: custom provider') : '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(map);
+        L.tileLayer(standalone ? 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png' : '/tiles/sea/{z}/{x}/{y}', { maxZoom: 18,
           attribution: 'Seamarks &copy; <a href="https://www.openseamap.org" target="_blank" rel="noopener">OpenSeaMap</a>' }).addTo(map);
         base.on('tileload', () => { loaded++; });
         base.on('tileerror', () => {
@@ -496,6 +528,7 @@
         L.control.scale({ imperial: false }).addTo(map);
         line = L.polyline([], { color: '#db5d28', weight: 3, opacity: 0.9 }).addTo(map);
         wptLine = L.polyline([], { color: '#1f7fe0', weight: 2, dashArray: '6 6' }).addTo(map);
+        aisLayer = L.layerGroup().addTo(map);
         wpt = L.circleMarker([0, 0], { radius: 6, color: '#fff', weight: 2, fillColor: '#1f7fe0', fillOpacity: 1 });
         ship = L.marker([0, 0], { interactive: false, icon: L.divIcon({ className: 'ship', iconSize: [30, 30], iconAnchor: [15, 15],
           html: '<svg viewBox="-12 -12 24 24"><path d="M0 -11 L7 9 L0 5 L-7 9Z"/></svg>' }) });
@@ -512,10 +545,61 @@
       const wl = get('nav.wpLat'), wo = get('nav.wpLon');
       if (wl != null && wo != null) { wpt.setLatLng([wl, wo]); if (!map.hasLayer(wpt)) wpt.addTo(map); wptLine.setLatLngs([pos, [wl, wo]]); }
       else { wpt.remove(); wptLine.setLatLngs([]); }
+      // AIS targets: one rotated marker per vessel, with its name on hover/tap
+      const seen = new Set();
+      for (const o of aisList()) {
+        seen.add(o.mmsi);
+        let mk = aisMarks.get(o.mmsi);
+        if (!mk) {
+          mk = L.marker([o.lat, o.lon], { icon: L.divIcon({ className: 'ais-mark', iconSize: [22, 22], iconAnchor: [11, 11], html: '<svg viewBox="-11 -11 22 22"><path d="M0 -10 L6 8 L-6 8Z"/></svg>' }) }).addTo(aisLayer);
+          mk.bindTooltip('', { direction: 'top', offset: [0, -10] });
+          aisMarks.set(o.mmsi, mk);
+        }
+        mk.setLatLng([o.lat, o.lon]);
+        const g = mk.getElement(); if (g) g.firstChild.style.transform = `rotate(${(o.hdg ?? o.cog ?? 0).toFixed(0)}deg)`;
+        mk.setTooltipContent(`${aisName(o)} · ${fu(conv('speed', o.sog), 1, unit('speed'))}${o.range != null ? ` · ${o.range.toFixed(2)} nm` : ''}`);
+      }
+      for (const [mmsi, mk] of aisMarks) if (!seen.has(mmsi)) { mk.remove(); aisMarks.delete(mmsi); }
       if (!fixed) { fixed = true; map.setView(pos, 13, { animate: false }); }
       else if (follow) map.panTo(pos, { animate: true, duration: 0.5 });
     });
-    return { el: h('div', 'chart', mapEl, plot, note), controls: h('span', 'h-tools', centre, h('span', 'mini-seg', bMap, bPlot)) };
+    const fit = h('button', { type: 'button', class: 'btn sm', text: 'Fit track', onclick: () => { const pts = [...histTrack, ...track]; if (map && pts.length > 1) { follow = false; centre.hidden = false; map.fitBounds(L.latLngBounds(pts).pad(0.15)); } } });
+    return { el: h('div', 'chart', mapEl, plot, note), controls: h('span', 'h-tools', fit, centre, h('span', 'mini-seg', bMap, bPlot)) };
+  }
+
+  /** AIS targets with range, bearing and closest point of approach (CPA) relative to own ship, nearest first */
+  function aisList() {
+    const la = lat(), lo = lon(), os = get('sog'), oc = get('cog'), out = [];
+    for (const tg of aisTargets.values()) {
+      if (tg.lat == null || tg.lon == null) continue;
+      const o = Object.assign({}, tg);
+      if (la != null && lo != null) {
+        const dN = (tg.lat - la) * 60, dE = (tg.lon - lo) * 60 * Math.cos(la * RAD);            // nautical miles
+        o.range = Math.hypot(dN, dE); o.brg = wrap(Math.atan2(dE, dN) / RAD);
+        if (os != null && oc != null && tg.sog != null && tg.cog != null) {
+          const kn = 1 / 0.514444, rE = (tg.sog * Math.sin(tg.cog * RAD) - os * Math.sin(oc * RAD)) * kn, rN = (tg.sog * Math.cos(tg.cog * RAD) - os * Math.cos(oc * RAD)) * kn, v2 = rE * rE + rN * rN;
+          if (v2 > 0.01) { const tc = -(dE * rE + dN * rN) / v2; o.tcpa = tc * 60; o.cpa = tc > 0 ? Math.hypot(dE + rE * tc, dN + rN * tc) : o.range; }
+        }
+      }
+      out.push(o);
+    }
+    return out.sort((a, b) => (a.range ?? 1e9) - (b.range ?? 1e9));
+  }
+  const aisName = (o) => o.name || `MMSI ${o.mmsi}`;
+  function aisTable() {
+    const body = h('tbody'); let last = 0;
+    reg(() => {
+      if (Date.now() - last < 950) return; last = Date.now();
+      const list = aisList().slice(0, 60);
+      body.replaceChildren(...(list.length ? list.map((o) => h('tr', null,
+        h('td', 'wrap', h('strong', { text: aisName(o) }), h('div', { class: 'desc', text: [`Class ${o.cls || '?'}`, N2K.aisTypeName(o.type), o.length ? `${o.length.toFixed(0)} m` : '', o.status || '', o.dest ? `to ${o.dest}` : ''].filter(Boolean).join(' · ') })),
+        h('td', { class: 'num', text: o.range == null ? '—' : `${o.range.toFixed(2)} nm` }), h('td', { class: 'num', text: fdeg(o.brg) }),
+        h('td', { class: 'num', text: fu(conv('speed', o.sog), 1, unit('speed')) }), h('td', { class: 'num', text: fdeg(o.cog) }),
+        h('td', { class: 'num' + (o.cpa != null && o.tcpa > 0 && o.cpa < 0.25 ? ' close' : ''), text: o.cpa == null ? '—' : `${o.cpa.toFixed(2)} nm` }),
+        h('td', { class: 'num', text: o.tcpa == null ? '—' : o.tcpa <= 0 ? 'passed' : o.tcpa > 180 ? '> 3 h' : `${o.tcpa.toFixed(0)} min` })))
+        : [h('tr', null, h('td', { colspan: 7, class: 'dim', text: 'No AIS targets received. AIS needs an AIS receiver or transponder on the NMEA 2000 network.' }))]));
+    });
+    return h('div', 'tbl-wrap', h('table', null, h('thead', null, h('tr', null, ['Vessel', 'Range', 'Bearing', 'SOG', 'COG', 'CPA', 'Time to CPA'].map((x, i) => h('th', { class: i ? 'num' : null, text: x })))), body));
   }
 
   /** track summary + export, like a location-history panel. Live = since this page opened; other ranges come from the bridge. */
@@ -589,8 +673,43 @@
   const oilGauge = (id) => gauge({ label: 'Oil press', unit: () => unit('pressure'), digits: () => (settings.pressure === 'kpa' ? 0 : 1), get: () => get(`eng.${id}.oilP`), show: (v) => conv('pressure', v), min: 0, max: 700, zones: [[0, 100, 'warn']] });
   const sogGauge = () => gauge({ label: 'SOG', unit: () => unit('speed'), digits: 1, get: () => get('sog'), show: (v) => conv('speed', v), min: 0,
     max: () => { const d = conv('speed', maxSog) * 1.15; return [10, 20, 40, 80, 160].find((x) => x >= d) / UNITS.speed[settings.speed][0]; } });
-  const depthShown = () => { const d = get('depth'); return d == null ? null : d + (get('depth.offset') || 0); };
+  const depthShown = () => { const d = get('depth'); return d == null ? null : settings.depthRef === 'transducer' ? d : d + (get('depth.offset') || 0); };   // below keel / waterline (using the sender's offset) or below the transducer
   const rudder = () => get(`rudder.${ids('rudder')[0] ?? 0}`);
+
+  /** how to chart a stored key: label, display conversion, unit, chart options (incl. the matching alarm threshold) */
+  function histSpec(key) {
+    const [p, id, fld] = key.split('.');
+    const thr = (alarm, lvl, label, mul = 1) => () => (al(alarm).on ? [{ v: al(alarm).value * mul, lvl: al(alarm).level, label }] : []);
+    if (p === 'eng' && fld === 'rpm') return { label: 'RPM', show: (v) => v, digits: 0, unit: () => 'rpm', o: { zero: true, minSpan: 50, thr: thr('overRev', 'warn', 'Over-speed') } };
+    if (p === 'eng' && fld === 'coolT') return { label: 'Coolant', show: cTemp, digits: 0, unit: () => unit('temp'), o: { minSpan: 1, thr: thr('coolant', 'crit', 'High') } };
+    if (p === 'tank') { const ty = +id.split('-')[0], low = [0, 1, 6].includes(ty); return { label: 'Level', show: (v) => v, digits: 0, unit: () => '%', o: { zero: true, minSpan: 1, thr: low ? thr(ty === 1 ? 'waterLow' : 'fuelLow', 'warn', 'Low') : [2, 5].includes(ty) ? thr('wasteHigh', 'warn', 'Full') : null } }; }
+    if (p === 'bat') return { label: 'Voltage', show: (v) => v, digits: 2, unit: () => 'V', o: { minSpan: 0.05, fit: true, thr: thrBat(id) } };
+    return { label: key, show: (v) => v, digits: 1, unit: () => '', o: {} };
+  }
+  const histTitle = (key) => { const [p, id] = key.split('.'), sp = histSpec(key); return `${p === 'eng' ? engName(id, ids('eng')) : p === 'tank' ? tankName(id, ids('tank')) : p === 'bat' ? batName(id) : ''} · ${sp.label.toLowerCase()} history`; };
+  /** a labelled history chart for a stored key */
+  function chartBox(key, labelled = true) {
+    const sp = histSpec(key);
+    return h('div', 'chart-box', labelled ? h('div', 'label', sp.label, ' ', t(null, () => fu(sp.show(get(key)), sp.digits, sp.unit()))) : null, spark(key, sp.show, sp.digits, sp.o));
+  }
+  /** custom names for engines, batteries and tanks (shared setting) */
+  function namesCard() {
+    const body = h('div', 'names'); let sig = null;
+    reg(() => {
+      const engs = ids('eng'), tanks = ids('tank');
+      const items = [...engs.map((id) => [`eng.${id}`, defEngName(id, engs), `Engine, instance ${id}`]), ...ids('bat').map((id) => [`bat.${id}`, defBatName(id), `Battery, instance ${id}`]),
+        ...tanks.map((id) => [`tank.${id}`, defTankName(id, tanks), `${N2K.TANK_TYPES[+id.split('-')[0]] || 'Tank'} tank, instance ${id.split('-')[1]}`])];
+      const sg = items.map((x) => x[0] + x[1]).join('|');
+      if (sg === sig || body.contains(document.activeElement)) return; sig = sg;
+      body.replaceChildren(...(items.length ? items.map(([key, def, what]) => {
+        const inp = h('input', { type: 'text', maxlength: 24, placeholder: def, value: settings.names[key] || '', 'aria-label': `Name for ${what}` });
+        inp.addEventListener('change', () => { const v = inp.value.trim(); if (v) settings.names[key] = v; else delete settings.names[key]; saveSettings(); inp.blur(); buildPages(); });
+        return h('label', 'name-row', h('span', null, h('strong', { text: def }), h('div', { class: 'desc', text: what })), inp);
+      }) : [h('div', { class: 'empty', text: 'Engines, batteries and tanks are listed here once their data is being received.' })]));
+    });
+    return card('Names', 'c12', h('p', { class: 'hint', text: 'Give engines, batteries and tanks your own names, for example "House bank" or "Main fuel". Leave a box empty to use the automatic name. Names are shared with every device.' }), body);
+  }
+  let showAllSources = false, bannerDismissed = false;
 
   // ================================================================ customisable dashboard ("My Dashboard")
   // Single-value panels: id -> [title, value text, unit text]
@@ -635,24 +754,31 @@
     map: { name: () => 'Chart', w: 6, h: 4, build: () => chartView() },
     position: { name: () => 'Position', w: 4, h: 2, build: () => h('div', 'ppos', t(null, () => fLatLon(lat(), 'N', 'S'), 'div'), t(null, () => fLatLon(lon(), 'E', 'W'), 'div')) },
     waypoint: { name: () => 'Waypoint', w: 4, h: 3, list: true, build: () => kv([['Distance', () => fNm(get('nav.dtw'))], ['Bearing', () => fdeg(get('nav.btw'))], ['VMG', () => fu(conv('speed', get('nav.vmg')), 1, unit('speed'))],
-      ['Cross-track', () => { const x = get('nav.xte'); return x == null ? '—' : `${Math.abs(x).toFixed(0)} m ${x < 0 ? 'P' : 'S'}`; }], ['ETA (UTC)', () => fTime(get('nav.eta'))]], 'wide') },
+      ['Cross-track', () => { const x = get('nav.xte'); return x == null ? '—' : `${Math.abs(x).toFixed(0)} m ${x < 0 ? 'port' : 'stbd'}`; }], ['ETA (UTC)', () => fTime(get('nav.eta'))]], 'wide') },
     gnss: { name: () => 'GNSS status', w: 4, h: 3, list: true, build: () => kv([['Fix', () => get('gnss.method') || '—'], ['Satellites', () => f(get('gnss.sats'))], ['HDOP', () => f(get('gnss.hdop'), 2)], ['PDOP', () => f(get('gnss.pdop'), 2)],
       ['Altitude', () => fu(get('gnss.alt'), 1, 'm')], ['UTC time', () => fTime(get('time.utc'))]], 'wide') },
     attitude: { name: () => 'Attitude & rudder', w: 3, h: 4, list: true, build: () => [rollInd(), kv([['Roll', () => fSide(get('roll'))], ['Pitch', () => fu(get('pitch'), 1, '°')], ['Rudder', () => fSide(rudder())]]), rudderBar()] },
     alarms: { name: () => 'Alarms', w: 4, h: 3, list: true, build: () => alertList() },
+    ais: { name: () => 'AIS targets', w: 8, h: 4, list: true, build: () => aisTable() },
     engines: { name: () => 'Engines', w: 5, h: 4, list: true, build: () => dyn(h('div', 'stack'), () => ids('eng'), (id, i, all) => h('div', 'eng-mini', rpmGauge(id),
       h('div', 'stack', h('strong', { text: engName(id, all) }), kv([['Coolant', () => fTemp(get(`eng.${id}.coolT`), 0)], ['Oil pressure', () => fPres(get(`eng.${id}.oilP`))],
         ['Fuel rate', () => fu(conv('volume', get(`eng.${id}.fuelRate`)), 1, `${unit('volume')}/h`)], ['Hours', () => fu(get(`eng.${id}.hours`), 1, 'h')]]))), 'No engine data received.') },
-    batteries: { name: () => 'Batteries', w: 4, h: 3, list: true, build: () => dyn(h('div'), () => ids('bat'), (id) => h('div', 'rowline', h('span', { class: 'name', text: `Battery ${+id + 1}` }),
+    batteries: { name: () => 'Batteries', w: 4, h: 3, list: true, build: () => dyn(h('div'), () => ids('bat'), (id) => h('div', 'rowline', h('span', { class: 'name', text: batName(id) }),
       h('span', 'val', t(null, () => fu(get(`bat.${id}.v`), 2, 'V')), t(null, () => { const a = get(`bat.${id}.a`), soc = get(`bat.${id}.soc`); return [a == null ? null : `${a > 0 ? '+' : ''}${a.toFixed(1)} A`, soc == null ? null : `${soc}%`].filter(Boolean).join(' · '); }, 'small'))), 'No battery data received.') },
     tanks: { name: () => 'Tanks', w: 4, h: 4, list: true, build: () => tankList() },
     temps: { name: () => 'Temperatures', w: 4, h: 3, list: true, build: () => dyn(h('div'), () => ids('temp'), (id) => h('div', 'rowline', h('span', { class: 'name', text: tempName(id) }), h('span', 'val', t(null, () => fTemp(get(`temp.${id}`))))), 'No temperature data received.') },
-    value: { name: (a) => (METRICS[a] || ['Value'])[0], w: 3, h: 2, build: (a) => { const m = METRICS[a]; return m ? h('div', 'pv', t('pv-num', m[1]), t('pv-unit', m[2])) : h('div', { class: 'empty', text: 'Unknown value' }); } },
+    value: { name: (a) => (METRICS[a] || ['Value'])[0], w: 3, h: 2, build: (a) => {
+      const m = METRICS[a]; if (!m) return h('div', { class: 'empty', text: 'Unknown value' });
+      const el = h('div', 'pv', t('pv-num', m[1]), t('pv-unit', m[2])); let len = 0;
+      reg(() => { const l = Math.max(4, m[1]().length + m[2]().length * 0.4); if (l !== len) { len = l; el.style.setProperty('--len', l.toFixed(1)); } });   // long values shrink to fit the panel
+      return el;
+    } },
     history: { name: (a) => (HISTORY[a] || ['History'])[0], w: 4, h: 3, build: (a) => { const d = HISTORY[a]; return d ? [big(() => f(d[2](d[5]()), 1), d[3], 'md'), spark(d[1], d[2], 1, d[4])] : h('div', { class: 'empty', text: 'Unknown history' }); } },
+    khist: { name: (a) => histTitle(a), w: 4, h: 3, build: (a) => { const sp = histSpec(a); return [big(() => f(sp.show(get(a)), sp.digits), sp.unit, 'md'), spark(a, sp.show, sp.digits, sp.o)]; } },
     engRpm: { name: (a) => `RPM · ${engName(a, ids('eng'))}`, w: 3, h: 3, build: (a) => rpmGauge(a) },
     engCool: { name: (a) => `Coolant · ${engName(a, ids('eng'))}`, w: 3, h: 3, build: (a) => coolGauge(a) },
     engOil: { name: (a) => `Oil pressure · ${engName(a, ids('eng'))}`, w: 3, h: 3, build: (a) => oilGauge(a) },
-    batV: { name: (a) => `Battery ${+a + 1} voltage`, w: 3, h: 3, build: (a) => batGauge(a) },
+    batV: { name: (a) => `${batName(a)} voltage`, w: 3, h: 3, build: (a) => batGauge(a) },
     tank: { name: (a) => tankName(a, ids('tank')), w: 3, h: 2, build: (a) => {
       const bar = h('i', tankClass(+a.split('-')[0]));
       reg(() => { bar.style.width = `${clamp(get(`tank.${a}.level`) ?? 0, 0, 100)}%`; });
@@ -663,12 +789,12 @@
   const newPanel = (type, arg) => ({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), type, arg, w: PANELS[type].w, h: PANELS[type].h });
   /** everything that can be added, grouped for the "Add panel" dialog */
   function panelCatalogue() {
-    const g = { Navigation: [['compass'], ['map'], ['position'], ['sog'], ['waypoint'], ['gnss'], ['attitude']], Wind: [['wind']], Engines: [['engines']], Electrical: [['batteries']], Tanks: [['tanks']],
+    const g = { Navigation: [['compass'], ['map'], ['position'], ['sog'], ['waypoint'], ['gnss'], ['attitude'], ['ais']], Wind: [['wind']], Engines: [['engines']], Electrical: [['batteries']], Tanks: [['tanks']],
       Environment: [['temps']], System: [['alarms']], 'Single values': Object.keys(METRICS).map((k) => ['value', k]), 'History graphs': Object.keys(HISTORY).map((k) => ['history', k]) };
     g.Wind.push(...['aws', 'awa', 'tws', 'twa', 'twd'].map((k) => ['value', k]));
-    for (const id of ids('eng')) g.Engines.push(['engRpm', id], ['engCool', id], ['engOil', id]);
-    for (const id of ids('bat')) g.Electrical.push(['batV', id]);
-    for (const id of ids('tank')) g.Tanks.push(['tank', id]);
+    for (const id of ids('eng')) g.Engines.push(['engRpm', id], ['engCool', id], ['engOil', id], ['khist', `eng.${id}.rpm`], ['khist', `eng.${id}.coolT`]);
+    for (const id of ids('bat')) g.Electrical.push(['batV', id], ['khist', `bat.${id}.v`]);
+    for (const id of ids('tank')) g.Tanks.push(['tank', id], ['khist', `tank.${id}.level`]);
     g.Environment.push(...['airT', 'seaT', 'baro', 'hum'].map((k) => ['value', k]));
     return g;
   }
@@ -682,12 +808,16 @@
       const def = PANELS[p.type]; if (!def) continue;
       const built = def.build(p.arg), body = h('div', 'panel-body' + (def.list ? ' list' : ''));
       body.append(...(built && built.controls ? [built.el] : [].concat(built)));
-      const move = h('button', { class: 'p-btn p-move', type: 'button', title: 'Drag to move', 'aria-label': 'Move panel', text: '⠿' });
-      const grip = h('div', { class: 'p-resize', title: 'Drag to resize' });
+      const move = h('button', { class: 'p-btn p-move', type: 'button', title: 'Drag to move (or focus and use the arrow keys)', 'aria-label': 'Move panel: drag, or use the arrow keys', text: '⠿' });
+      const grip = h('div', { class: 'p-resize', title: 'Drag to resize (or focus and use the arrow keys)', tabindex: 0, role: 'button', 'aria-label': 'Resize panel: drag, or use the arrow keys' });
       const el = h('section', { class: 'card panel', 'data-id': p.id, style: `grid-column: span ${p.w}; grid-row: span ${p.h}` },
-        h('h3', null, t('p-title', () => def.name(p.arg)), built && built.controls ? built.controls : null,
-          h('span', 'p-edit', move, h('button', { class: 'p-btn', type: 'button', title: 'Remove panel', 'aria-label': 'Remove panel', text: '✕',
-            onclick: () => { settings.panels = settings.panels.filter((x) => x.id !== p.id); saveSettings(); buildPages(); } }))), body, grip);
+        h('h3', null, t('p-title', () => p.title || def.name(p.arg)), built && built.controls ? built.controls : null,
+          h('span', 'p-edit', move,
+            h('button', { class: 'p-btn', type: 'button', title: 'Rename panel', 'aria-label': 'Rename panel', text: '✎', onclick: () => { const v = window.prompt('Panel title (leave empty for the automatic title)', p.title || def.name(p.arg)); if (v == null) return; if (v.trim()) p.title = v.trim().slice(0, 40); else delete p.title; saveSettings(); buildPages(); } }),
+            h('button', { class: 'p-btn', type: 'button', title: 'Remove panel', 'aria-label': 'Remove panel', text: '✕', onclick: () => {
+              const at = settings.panels.indexOf(p); settings.panels = settings.panels.filter((x) => x.id !== p.id); saveSettings(); buildPages();
+              toast(`"${p.title || def.name(p.arg)}" removed.`, 'info', 9000, h('button', { class: 'btn sm', type: 'button', text: 'Undo', onclick: () => { settings.panels.splice(Math.min(at, settings.panels.length), 0, p); saveSettings(); buildPages(); $('#toast').hidden = true; } }));
+            } }))), body, grip);
       // move: drag the handle over another panel to take its place
       move.addEventListener('pointerdown', (e) => {
         e.preventDefault(); move.setPointerCapture(e.pointerId); el.classList.add('dragging');
@@ -714,11 +844,25 @@
         const onUp = () => { grip.removeEventListener('pointermove', onMove); grip.removeEventListener('pointerup', onUp); grip.removeEventListener('pointercancel', onUp); el.classList.remove('resizing'); saveSettings(); };
         grip.addEventListener('pointermove', onMove); grip.addEventListener('pointerup', onUp); grip.addEventListener('pointercancel', onUp);
       });
+      move.addEventListener('keydown', (e) => {
+        const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp', fwd = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+        if (!back && !fwd) return;
+        e.preventDefault();
+        const sib = back ? el.previousElementSibling : el.nextElementSibling;
+        if (sib) { if (back) sib.before(el); else sib.after(el); saveOrder(); move.focus(); }
+      });
+      grip.addEventListener('keydown', (e) => {
+        const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+        if (!d) return;
+        e.preventDefault();
+        p.w = clamp(p.w + d[0], 2, 12); p.h = clamp(p.h + d[1], 1, 10);
+        el.style.gridColumn = `span ${p.w}`; el.style.gridRow = `span ${p.h}`; saveSettings();
+      });
       grid.append(el);
     }
     if (!grid.children.length) grid.append(h('div', { class: 'empty dash-empty', text: 'This dashboard is empty. Choose "Edit layout", then "Add panel".' }));
     const bar = h('div', 'dash-bar',
-      h('span', { class: 'hint', text: editMode ? 'Drag ⠿ to move a panel, drag its bottom-right corner to resize, ✕ to remove. The layout is saved in this browser.' : '' }),
+      h('span', { class: 'hint', text: editMode ? 'Drag ⠿ to move a panel, drag its bottom-right corner to resize, ✕ to remove. The layout is shared with every device.' : '' }),
       editMode ? h('button', { class: 'btn sm', type: 'button', text: 'Reset layout', onclick: () => { delete settings.panels; saveSettings(); buildPages(); } }) : null,
       editMode ? h('button', { class: 'btn sm', type: 'button', text: '+ Add panel', onclick: openAddPanel }) : null,
       h('button', { class: 'btn sm' + (editMode ? ' primary' : ''), type: 'button', text: editMode ? 'Done' : 'Edit layout', onclick: () => { editMode = !editMode; buildPages(); } }));
@@ -745,20 +889,20 @@
           max: () => { const d = conv('speed', maxSog) * 1.15; return [10, 20, 40, 80, 160].find((x) => x >= d) / UNITS.speed[settings.speed][0]; } })),
         kv([['Speed through water', () => fu(conv('speed', get('stw')), 1, unit('speed'))], ['VMG to waypoint', () => fu(conv('speed', get('nav.vmg')), 1, unit('speed'))],
           ['Log', () => fNm(get('log.total'))], ['Trip', () => fNm(get('log.trip'))]], 'wide')),
-      card(['Depth', t(null, () => { const o = get('depth.offset'); return o == null ? '' : o < 0 ? `below keel (offset ${f(conv('depth', o), 1)} ${unit('depth')})` : o > 0 ? 'below waterline' : 'below transducer'; }, 'small')], 'c4',
-        big(() => { const d = get('depth'), o = get('depth.offset'); return f(conv('depth', d == null ? null : d + (o || 0)), 1); }, () => unit('depth')),
+      card(['Depth', t(null, () => { const o = settings.depthRef === 'transducer' ? 0 : get('depth.offset'); return o == null ? '' : o < 0 ? `below keel (offset ${f(conv('depth', o), 1)} ${unit('depth')})` : o > 0 ? 'below waterline' : 'below transducer'; }, 'small')], 'c4',
+        big(() => f(conv('depth', depthShown()), 1), () => unit('depth')),
         spark('depth', (v) => conv('depth', v), 1, { invert: true, minSpan: 0.5, thr: thrDepth })),
       card('Wind', 'c4', h('div', 'center', windDial()),
         kv([['Apparent angle', () => fSide(get('wind.awa'))], ['True speed', () => fu(conv('speed', trueWind().tws), 1, unit('speed'))], ['True direction', () => fdeg(trueWind().twd)]])),
       card(['Position', t(null, () => get('gnss.method') || '', 'small')], 'c4',
         h('div', 'stack', big(() => fLatLon(lat(), 'N', 'S'), '', 'md'), big(() => fLatLon(lon(), 'E', 'W'), '', 'md')),
         kv([['Satellites', () => f(get('gnss.sats'))], ['HDOP', () => f(get('gnss.hdop'), 1)], ['Waypoint', () => fNm(get('nav.dtw'))], ['Bearing', () => fdeg(get('nav.btw'))],
-          ['Cross-track', () => { const x = get('nav.xte'); return x == null ? '—' : `${Math.abs(x).toFixed(0)} m ${x < 0 ? 'P' : 'S'}`; }], ['ETA (UTC)', () => fTime(get('nav.eta'))]])),
+          ['Cross-track', () => { const x = get('nav.xte'); return x == null ? '—' : `${Math.abs(x).toFixed(0)} m ${x < 0 ? 'port' : 'stbd'}`; }], ['ETA (UTC)', () => fTime(get('nav.eta'))]])),
       card(['Alarms', h('button', { class: 'btn sm', type: 'button', text: 'Configure', onclick: () => show('alarms') })], 'c4', alertList()),
       card('Engines', 'c6', dyn(h('div', 'stack'), () => ids('eng'), (id, i, all) => h('div', 'eng-mini', rpmGauge(id),
         h('div', 'stack', h('strong', { text: engName(id, all) }), kv([['Coolant', () => fTemp(get(`eng.${id}.coolT`), 0)], ['Oil pressure', () => fPres(get(`eng.${id}.oilP`))],
           ['Fuel rate', () => fu(conv('volume', get(`eng.${id}.fuelRate`)), 1, `${unit('volume')}/h`)], ['Hours', () => fu(get(`eng.${id}.hours`), 1, 'h')]]))), 'No engine data received.')),
-      card('Batteries', 'c3', dyn(h('div'), () => ids('bat'), (id) => h('div', 'rowline', h('span', { class: 'name', text: `Battery ${+id + 1}` }),
+      card('Batteries', 'c3', dyn(h('div'), () => ids('bat'), (id) => h('div', 'rowline', h('span', { class: 'name', text: batName(id) }),
         h('span', 'val', t(null, () => fu(get(`bat.${id}.v`), 2, 'V')), t(null, () => { const a = get(`bat.${id}.a`), soc = get(`bat.${id}.soc`); return [a == null ? null : `${a > 0 ? '+' : ''}${a.toFixed(1)} A`, soc == null ? null : `${soc}%`].filter(Boolean).join(' · '); }, 'small'))), 'No battery data received.')),
       card('Tanks', 'c3', tankList()),
       card('Environment', 'c12', h('div', 'tiles',
@@ -785,6 +929,7 @@
           ['Waypoint lat', () => fLatLon(get('nav.wpLat'), 'N', 'S')], ['Waypoint lon', () => fLatLon(get('nav.wpLon'), 'E', 'W')]], 'wide')),
       card('Attitude & rudder', 'c4', rollInd(),
         kv([['Roll', () => fSide(get('roll'))], ['Pitch', () => { const p = get('pitch'); return p == null ? '—' : `${Math.abs(p).toFixed(1)}° ${p >= 0 ? 'bow up' : 'bow down'}`; }], ['Rudder', () => fSide(get(`rudder.${ids('rudder')[0] ?? 0}`))]]), rudderBar()),
+      card(['AIS targets', t(null, () => { const c = aisList().length; return c ? `${c} in range` : ''; }, 'small')], 'c12', aisTable()),
       trackCard(),
       card('Depth history', 'c4', big(() => f(conv('depth', get('depth')), 1), () => unit('depth'), 'md'), spark('depth', (v) => conv('depth', v), 1, { invert: true, minSpan: 0.5, thr: thrDepth })),
       card('Speed history', 'c4', big(() => fSpd(get('sog')), () => `${unit('speed')} SOG`, 'md'), spark('sog', (v) => conv('speed', v), 1, { zero: true, minSpan: 0.2 })),
@@ -806,7 +951,8 @@
           ['Alternator', () => fu(get(`eng.${id}.altV`), 1, 'V')], ['Oil temperature', () => fTemp(get(`eng.${id}.oilT`), 0)], ['Boost pressure', () => fPres(get(`eng.${id}.boost`))],
           ['Fuel pressure', () => fPres(get(`eng.${id}.fuelP`))], ['Coolant pressure', () => fPres(get(`eng.${id}.coolP`))], ['Trim', () => fu(get(`eng.${id}.trim`), 0, '%')],
           ['Gearbox oil', () => fPres(get(`eng.${id}.transP`))], ['Gearbox temp', () => fTemp(get(`eng.${id}.transT`), 0)], ['Engine hours', () => fu(get(`eng.${id}.hours`), 1, 'h')],
-          ['Torque', () => fu(get(`eng.${id}.torque`), 0, '%')]]), chips);
+          ['Torque', () => fu(get(`eng.${id}.torque`), 0, '%')]]),
+          h('div', 'charts2', chartBox(`eng.${id}.rpm`), chartBox(`eng.${id}.coolT`)), chips);
       }, 'No engine data (PGN 127488 / 127489) received yet.'),
     ]],
 
@@ -814,8 +960,8 @@
       dyn(h('div', 'cards'), () => ids('bat'), (id) => {
         const soc = h('i', 'good');
         reg(() => { const v = get(`bat.${id}.soc`); soc.style.width = `${v ?? 0}%`; soc.className = v == null ? '' : v < 20 ? 'crit' : v < 40 ? 'warn' : 'good'; });
-        return card([`Battery ${+id + 1}`, h('small', { text: `instance ${id}` })], '', h('div', 'split', batGauge(id), h('div', 'stack',
-          big(() => { const a = get(`bat.${id}.a`); return a == null ? '—' : `${a > 0 ? '+' : ''}${a.toFixed(1)}`; }, () => { const a = get(`bat.${id}.a`); return a == null ? 'A' : a > 0.05 ? 'A charging' : a < -0.05 ? 'A discharging' : 'A'; }, 'md'),
+        return card([batName(id), h('small', { text: `instance ${id}` })], '', h('div', 'split', batGauge(id), h('div', 'stack',
+          big(() => { const a = get(`bat.${id}.a`); return a == null ? '—' : Math.abs(a).toFixed(1); }, () => { const a = get(`bat.${id}.a`); return a == null ? 'A' : a > 0.05 ? 'A charging' : a < -0.05 ? 'A discharging' : 'A'; }, 'md'),
           h('div', null, h('div', 'meter', soc), t('hint', () => { const v = get(`bat.${id}.soc`); return v == null ? 'State of charge not reported' : `${v}% state of charge`; }, 'p')))),
         kv([['Power', () => { const v = get(`bat.${id}.v`), a = get(`bat.${id}.a`); return v == null || a == null ? '—' : `${(v * a).toFixed(0)} W`; }], ['Temperature', () => fTemp(get(`bat.${id}.temp`))],
           ['Time remaining', () => fDur(get(`bat.${id}.remaining`))], ['Health', () => fu(get(`bat.${id}.soh`), 0, '%')]]),
@@ -831,6 +977,7 @@
         });
         return h('div', 'stack', h('strong', { text: `Switch bank ${bank}` }), grid);
       }, 'No switch bank status (PGN 127501) received.')),
+      card('Tank level history', 'c12', dyn(h('div', 'charts-grid'), () => ids('tank'), (id, i, all) => h('div', null, h('strong', { text: tankName(id, all) }), chartBox(`tank.${id}.level`, false)), 'No tank level data received.')),
     ]],
 
     environment: ['Environment', () => [
@@ -888,9 +1035,9 @@
     sources: ['Sources', () => {
       const body = h('tbody'); let sig = '', inUse = [];
       reg(() => {
-        const groups = [...groupSrcs.entries()].map(([g, m]) => { const list = new Set(m.keys()); if (settings.sources[g] != null) list.add(settings.sources[g]); return [g, [...list].sort((a, b) => a - b)]; })
+        const groups = [...groupSrcs.entries()].filter(([g, m]) => showAllSources || m.size > 1 || settings.sources[g] != null).map(([g, m]) => { const list = new Set(m.keys()); if (settings.sources[g] != null) list.add(settings.sources[g]); return [g, [...list].sort((a, b) => a - b)]; })
           .sort((a, b) => (b[1].length > 1) - (a[1].length > 1) || a[0].localeCompare(b[0], undefined, { numeric: true }));
-        const sg = JSON.stringify(groups) + groups.map(([, l]) => l.map(srcLabel).join()).join();
+        const sg = showAllSources + JSON.stringify(groups) + groups.map(([, l]) => l.map(srcLabel).join()).join();
         if (sg !== sig && !body.contains(document.activeElement)) {
           sig = sg; inUse = [];
           body.replaceChildren(...(groups.length ? groups.map(([g, list]) => {
@@ -899,7 +1046,7 @@
             sel.onchange = () => { if (sel.value === 'auto') delete settings.sources[g]; else settings.sources[g] = +sel.value; saveSettings(); groupActive.delete(g); };
             const use = h('td', 'wrap'); inUse.push([g, use]);
             return h('tr', null, h('td', 'wrap', h('strong', { text: g })), h('td', null, h('span', { class: 'chip' + (list.length > 1 ? ' on' : ''), text: list.length > 1 ? `${list.length} sources` : '1 source' })), h('td', null, sel), use);
-          }) : [h('tr', null, h('td', { colspan: 4, class: 'dim', text: 'Waiting for data…' }))]));
+          }) : [h('tr', null, h('td', { colspan: 4, class: 'dim', text: groupSrcs.size ? 'No data is currently being sent by more than one device, so there is nothing to prioritise. Tick "Show all" to see every data type.' : 'Waiting for data…' }))]));
         }
         for (const [g, cell] of inUse) {
           const act = groupActive.get(g), pref = settings.sources[g], m = groupSrcs.get(g);
@@ -909,16 +1056,18 @@
         }
       });
       return [
-        card('Source priority', 'c12',
+        card(['Source priority', (() => { const cb = h('input', { type: 'checkbox', id: 'allSrc' }); cb.checked = showAllSources; cb.onchange = () => { showAllSources = cb.checked; sig = ''; }; return h('label', { class: 'h-check', for: 'allSrc' }, cb, 'Show all'); })()], 'c12',
           h('p', { class: 'hint', text: 'When more than one device on the NMEA 2000 network sends the same data, the dashboard uses one source at a time so values do not jump between devices. '
             + 'Automatic keeps the first source seen and switches only if it stops sending. Choose a source address to prioritise it: it is used whenever it is sending, and the dashboard falls back to another source if it stops.' }),
           h('div', 'tbl-wrap tall', h('table', 'cfg', h('thead', null, h('tr', null, ['Data', 'Available', 'Priority source', 'Currently using'].map((x) => h('th', { text: x })))), body))),
+        namesCard(),
       ];
     }],
 
     network: ['Network', () => {
       const gw = h('div', 'stack'), devBody = h('tbody'), pgnBody = h('tbody'), log = h('pre', 'log'), pause = h('button', { class: 'btn sm', type: 'button', text: 'Pause' });
       let paused = false, last = 0;
+      const logFilter = h('input', { type: 'text', placeholder: 'Filter, e.g. a PGN in hex (1F805) or text', 'aria-label': 'Filter the raw log', spellcheck: 'false' });
       pause.onclick = () => { paused = !paused; pause.textContent = paused ? 'Resume' : 'Pause'; };
       reg(() => {
         if (Date.now() - last < 950) return; last = Date.now();
@@ -932,13 +1081,13 @@
           h('td', { class: 'mono', text: pgn }), h('td', { text: N2K.PGN_NAMES[pgn] || 'Unknown / proprietary' }),
           h('td', { class: 'mono dim', text: [...st.srcs].map((x) => x.toString(16).toUpperCase().padStart(2, '0')).join(' ') }),
           h('td', { class: 'num', text: st.n.toLocaleString() }), h('td', { class: 'num', text: st.rate ? `${st.rate}/s` : '—' }), h('td', { class: 'dim', text: N2K.supported.includes(pgn) ? 'Displayed' : '' }))));
-        if (!paused) { log.textContent = rawLog.slice(-120).join('\n'); log.scrollTop = log.scrollHeight; }
+        if (!paused) { const q = logFilter.value.trim().toUpperCase(); log.textContent = (q ? rawLog.filter((l) => l.toUpperCase().includes(q)) : rawLog).slice(-120).join('\n'); log.scrollTop = log.scrollHeight; }
       });
       return [
         card('Gateway', 'c4', gw),
         card(['NMEA 2000 devices', h('small', { text: 'sources seen in the data stream' })], 'c8', h('div', 'tbl-wrap', h('table', null, h('thead', null, h('tr', null, ['Source', 'Manufacturer', 'Model', 'Firmware', 'Messages', 'Last seen'].map((x, i) => h('th', { class: i === 4 ? 'num' : null, text: x })))), devBody))),
         card(['PGN traffic', t(null, () => `${pgnStats.size} PGNs · ${conn.rate || 0} msg/s${badLines ? ` · ${badLines} unparsed lines` : ''}`, 'small')], 'c7', h('div', 'tbl-wrap', h('table', null, h('thead', null, h('tr', null, ['PGN', 'Description', 'Sources', 'Count', 'Rate', ''].map((x, i) => h('th', { class: i === 3 || i === 4 ? 'num' : null, text: x })))), pgnBody))),
-        card(['Raw N2K ASCII', pause], 'c5', log),
+        card(['Raw N2K ASCII', pause], 'c5', logFilter, log),
       ];
     }],
   };
@@ -990,6 +1139,8 @@
   const navIcon = (d) => s('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, s('path', { d }));
   function buildPages() {
     const main = $('#main'), tabs = $('#tabs');
+    // remember what had keyboard focus so a rebuild does not throw it away
+    const fa = document.activeElement, focusKey = fa && main.contains(fa) ? [fa.tagName, (fa.getAttribute('aria-label') || fa.textContent || '').slice(0, 60)] : null;
     leafMaps.forEach((m) => m.remove()); leafMaps = [];
     main.replaceChildren(); tabs.replaceChildren();
     let lastGroup = '';
@@ -999,15 +1150,19 @@
       pages[id] = { el, ups };
       main.append(el);
       if (NAV[id][0] !== lastGroup) { lastGroup = NAV[id][0]; tabs.append(h('div', { class: 'nav-group', text: lastGroup })); }
-      tabs.append(h('button', { type: 'button', role: 'tab', 'data-page': id, onclick: () => show(id) }, navIcon(NAV[id][1]), h('span', { text: title })));
+      tabs.append(h('button', { type: 'button', 'data-page': id, onclick: () => show(id) }, navIcon(NAV[id][1]), h('span', { text: title })));
     }
     tabs.append(h('button', { type: 'button', onclick: () => openSettings() }, navIcon('M4 7h10M18 7h2M4 17h2M10 17h10M16 4.5v5M8 14.5v5'), h('span', { text: 'Settings' })));
     show(PAGES[location.hash.slice(1)] ? location.hash.slice(1) : 'overview');
+    if (focusKey) {
+      const again = [...pages[active].el.querySelectorAll(focusKey[0])].find((e) => (e.getAttribute('aria-label') || e.textContent || '').slice(0, 60) === focusKey[1]);
+      (again || main).focus({ preventScroll: true });
+    }
   }
   function show(id) {
     active = id;
     for (const k in pages) pages[k].el.hidden = k !== id;
-    for (const b of $('#tabs').querySelectorAll('[data-page]')) b.setAttribute('aria-selected', b.dataset.page === id);
+    for (const b of $('#tabs').querySelectorAll('[data-page]')) { if (b.dataset.page === id) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
     $('#pageTitle').textContent = PAGES[id][0];
     history.replaceState(null, '', '#' + id);
     render();
@@ -1145,10 +1300,10 @@
     setTxt('#devSource', sim ? (standalone ? 'Not connected' : 'No gateway connected') : whereTxt());
     setTxt('#devLast', since == null ? 'No data yet' : since < 3 ? 'Receiving data' : `Last data ${since < 90 ? since.toFixed(0) + ' s' : (since / 60).toFixed(0) + ' min'} ago`);
     $('#devStatus').className = 'dev-status ' + (since != null && since < 5 ? (sim ? 'demo' : 'live') : 'bad');
-    const banner = $('#banner'), demo = bridgeUp && conn.mode === 'sim';
+    const banner = $('#banner'), demo = bridgeUp && conn.mode === 'sim' && !bannerDismissed;
     if (banner.hidden === demo) {
       banner.hidden = !demo;
-      if (demo && !banner.firstChild) banner.append('Showing built-in demo data. Connect to your W2K-2 over TCP or UDP to see live NMEA 2000 data.', h('button', { class: 'btn sm primary', type: 'button', text: 'Connect…', onclick: openSettings }));
+      if (demo && !banner.firstChild) banner.append('Showing built-in demo data. Connect to your W2K-2 over TCP or UDP to see live NMEA 2000 data.', h('button', { class: 'btn sm primary', type: 'button', text: 'Connect…', onclick: openSettings }), h('button', { class: 'btn sm', type: 'button', text: 'Hide', 'aria-label': 'Hide this message', onclick: () => { bannerDismissed = true; banner.hidden = true; } }));
     }
   });
 
@@ -1156,8 +1311,11 @@
   setInterval(() => {
     const now = Date.now(), tw = trueWind();
     const sample = (k, v) => { if (v == null) return; const a = (H[k] = H[k] || []); a.push({ t: now, v }); if (a.length > 900) a.shift(); };
+    for (const [mmsi, tg] of aisTargets) if (!tg.t || now - tg.t > 600000) aisTargets.delete(mmsi);   // drop AIS targets not heard for 10 min
     sample('depth', get('depth')); sample('sog', get('sog')); sample('pressure', get('pressure')); sample('tws', tw.tws);
     for (const id of ids('bat')) sample(`bat.${id}.v`, get(`bat.${id}.v`));
+    for (const id of ids('eng')) { sample(`eng.${id}.rpm`, get(`eng.${id}.rpm`)); sample(`eng.${id}.coolT`, get(`eng.${id}.coolT`)); }
+    for (const id of ids('tank')) sample(`tank.${id}.level`, get(`tank.${id}.level`));
     const sog = get('sog'); if (sog != null) maxSog = Math.max(maxSog * 0.9995, sog);
     const la = lat(), lo = lon();
     if (la != null && lo != null) {
@@ -1186,8 +1344,9 @@
     try { const j = await (await fetch('/api/config')).json(); form.mode.value = j.config.mode; form.host.value = j.config.host || ''; form.port.value = j.config.port || ''; } catch { /* no bridge */ }
     if (direct || standalone) { form.mode.value = 'ws'; if (settings.ws && settings.ws.host) form.host.value = settings.ws.host; }
     for (const r of form.mode) if (r.value !== 'ws') r.disabled = standalone;   // TCP, UDP and demo data need the bridge program
-    for (const k of ['speed', 'depth', 'temp', 'pressure', 'volume', 'theme', 'brightness']) form[k].value = settings[k];
+    for (const k of ['speed', 'depth', 'temp', 'pressure', 'volume', 'depthRef', 'theme', 'brightness']) form[k].value = settings[k];
     $('#brightVal').textContent = `${settings.brightness}%`;
+    form.tileUrl.value = (settings.tiles && settings.tiles.url) || ''; form.tileAttr.value = (settings.tiles && settings.tiles.attribution) || '';
     $('#settingsError').hidden = true; $('#serverList').replaceChildren(); $('#testResult').hidden = true; syncMode();
     opened = { mode: form.mode.value, host: form.host.value, port: form.port.value, theme: settings.theme, brightness: settings.brightness };
     if (!dlg.open) dlg.showModal();
@@ -1278,8 +1437,11 @@
       if (settings.ws) settings.ws.on = false;
       if (wasDirect) stopDirect();
     }
-    for (const k of ['speed', 'depth', 'temp', 'pressure', 'volume', 'theme']) settings[k] = form[k].value;
+    for (const k of ['speed', 'depth', 'temp', 'pressure', 'volume', 'depthRef', 'theme']) settings[k] = form[k].value;
     settings.brightness = +form.brightness.value;
+    const tileUrl = form.tileUrl.value.trim();
+    if (tileUrl && !/^https:\/\/.+\{z\}.+\{x\}.+\{y\}/.test(tileUrl)) { err.textContent = 'The map tile address must start with https:// and contain {z}, {x} and {y}.'; err.hidden = false; return; }
+    settings.tiles = tileUrl ? { url: tileUrl, attribution: form.tileAttr.value.trim() } : {};
     const connChanged = wasDirect !== direct || opened.mode !== form.mode.value || opened.host !== form.host.value || String(opened.port) !== String(form.port.value);
     saveSettings(); applyTheme(); dlg.returnValue = 'saved'; dlg.close(); buildPages();   // rebuild so unit labels and alarm thresholds follow the new units
     if (connChanged) watchConnection(); else toast('Settings saved.', 'good', 3000);

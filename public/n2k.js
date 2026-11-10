@@ -59,9 +59,19 @@
     127501: 'Binary Switch Bank Status', 127505: 'Fluid Level', 127506: 'DC Detailed Status', 127507: 'Charger Status', 127508: 'Battery Status',
     128259: 'Speed, Water Referenced', 128267: 'Water Depth', 128275: 'Distance Log', 129025: 'Position, Rapid Update', 129026: 'COG & SOG, Rapid Update',
     129029: 'GNSS Position Data', 129033: 'Local Time Offset', 129038: 'AIS Class A Position', 129039: 'AIS Class B Position', 129283: 'Cross Track Error',
-    129284: 'Navigation Data', 129285: 'Route/WP Information', 129539: 'GNSS DOPs', 129540: 'GNSS Sats in View', 129794: 'AIS Class A Static Data',
+    129284: 'Navigation Data', 129285: 'Route/WP Information', 129539: 'GNSS DOPs', 129540: 'GNSS Sats in View', 129794: 'AIS Class A Static Data', 129809: 'AIS Class B Static Data, Part A', 129810: 'AIS Class B Static Data, Part B',
     130306: 'Wind Data', 130310: 'Environmental Parameters', 130311: 'Environmental Parameters', 130312: 'Temperature', 130313: 'Humidity',
     130314: 'Actual Pressure', 130316: 'Temperature, Extended Range', 130577: 'Direction Data' };
+
+  const AIS_NAV_STATUS = ['Under way using engine', 'At anchor', 'Not under command', 'Restricted manoeuvrability', 'Constrained by draught', 'Moored', 'Aground', 'Fishing', 'Under way sailing'];
+  function aisPosition(r, ais, cls) {
+    const f = { cls, lon: sc(r.s32(5), 1e-7), lat: sc(r.s32(9), 1e-7), cog: ang(r.u16(14)), sog: sc(r.u16(16), 0.01), hdg: ang(r.u16(21)) };
+    if (cls === 'A') f.status = AIS_NAV_STATUS[r.raw(25) & 15] || null;
+    ais(r.u32(1), f);
+  }
+  /** broad AIS ship-type groups */
+  const aisTypeName = (t) => (t == null ? '' : t === 30 ? 'Fishing' : t === 31 || t === 32 || t === 52 ? 'Tug' : t === 36 ? 'Sailing' : t === 37 ? 'Pleasure craft' : t === 50 ? 'Pilot' : t === 51 ? 'Search & rescue'
+    : t >= 40 && t < 50 ? 'High-speed craft' : t >= 60 && t < 70 ? 'Passenger' : t >= 70 && t < 80 ? 'Cargo' : t >= 80 && t < 90 ? 'Tanker' : 'Other');
 
   const DECODERS = {
     60928(r, put, m) {
@@ -137,6 +147,14 @@
     },
     129539(r, put) { put('gnss.hdop', sc(r.s16(2), 0.01)); put('gnss.vdop', sc(r.s16(4), 0.01)); },
     129540(r, put) { put('gnss.inView', r.u8(2)); },
+    // ---- AIS (reported through the ais(mmsi, fields) callback, not the value store)
+    129038(r, put, m, ais) { aisPosition(r, ais, 'A'); },
+    129039(r, put, m, ais) { aisPosition(r, ais, 'B'); },
+    129794(r, put, m, ais) {
+      ais(r.u32(1), { cls: 'A', callsign: r.str(9, 7), name: r.str(16, 20), type: r.u8(36), length: sc(r.u16(37), 0.1), beam: sc(r.u16(39), 0.1), dest: r.str(53, 20) });
+    },
+    129809(r, put, m, ais) { ais(r.u32(1), { cls: 'B', name: r.str(5, 20) }); },
+    129810(r, put, m, ais) { ais(r.u32(1), { cls: 'B', type: r.u8(5), callsign: r.str(13, 7), length: sc(r.u16(20), 0.1), beam: sc(r.u16(22), 0.1) }); },
     130306(r, put) {
       const spd = sc(r.u16(1), 0.01), a = ang(r.u16(3)), ref = r.raw(5) & 7;
       if (ref === 2) { put('wind.aws', spd); put('wind.awa', a); }
@@ -173,14 +191,14 @@
     return k;
   }
 
-  function decode(msg, put) {
+  function decode(msg, put, ais) {
     const d = DECODERS[msg.pgn];
     if (!d) return false;
-    try { d(new R(msg.data), put, msg); } catch (e) { return false; }
+    try { d(new R(msg.data), put, msg, ais || (() => {})); } catch (e) { return false; }
     return true;
   }
 
-  const api = { parseLine, decode, groupOf, PGN_NAMES, TEMP_SOURCES, TANK_TYPES, ENGINE_STATUS1, ENGINE_STATUS2, MANUFACTURERS,
+  const api = { parseLine, decode, groupOf, aisTypeName, PGN_NAMES, TEMP_SOURCES, TANK_TYPES, ENGINE_STATUS1, ENGINE_STATUS2, MANUFACTURERS,
     supported: Object.keys(DECODERS).map(Number) };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;   // also used by the bridge (Node.js)
   global.N2K = api;

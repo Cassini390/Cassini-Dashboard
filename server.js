@@ -214,6 +214,38 @@ function proxyDevice(endpoint, host, res, object) {
   req.on('error', (e) => { if (!res.headersSent) json(res, 502, { error: e.code || e.message }); });
 }
 
+// ---------------------------------------------------------------- map tiles: caching proxy
+// Tiles the dashboard asks for are fetched once and kept on disk (tile-cache/), so areas that have been viewed
+// keep working with no internet connection. Only tiles actually viewed are stored - nothing is bulk-downloaded.
+const TILE_DIR = path.join(BASE, 'tile-cache');
+const TILE_FRESH_MS = 30 * 24 * 3600000;
+const TILE_SOURCES = { osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', sea: 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png' };
+function tileType(buf) { return buf[0] === 0xFF && buf[1] === 0xD8 ? 'image/jpeg' : buf.slice(0, 4).toString('latin1') === 'RIFF' ? 'image/webp' : 'image/png'; }
+function serveTile(layer, z, x, y, res) {
+  const zi = +z, xi = +x, yi = +y;
+  if (!['base', 'sea'].includes(layer) || !Number.isInteger(zi) || !Number.isInteger(xi) || !Number.isInteger(yi) || zi < 0 || zi > 20 || xi < 0 || yi < 0 || xi >= 2 ** zi || yi >= 2 ** zi) { res.writeHead(400); return res.end(); }
+  const custom = layer === 'base' && prefs && prefs.tiles && /^https:\/\/[^\s]+\{z\}[^\s]+\{x\}[^\s]+\{y\}/.test(prefs.tiles.url || '') ? prefs.tiles.url : null;
+  const tpl = layer === 'sea' ? TILE_SOURCES.sea : custom || TILE_SOURCES.osm;
+  const tag = layer === 'sea' ? 'sea' : custom ? 'custom-' + require('crypto').createHash('sha1').update(custom).digest('hex').slice(0, 10) : 'osm';
+  const file = path.join(TILE_DIR, tag, String(zi), String(xi), `${yi}.tile`);
+  const send = (buf) => { res.writeHead(200, { 'Content-Type': tileType(buf), 'Cache-Control': 'public, max-age=86400' }); res.end(buf); };
+  fs.readFile(file, (err, cached) => {
+    let age = Infinity;
+    if (!err) { try { age = Date.now() - fs.statSync(file).mtimeMs; } catch { /* treat as stale */ } }
+    if (!err && age < TILE_FRESH_MS) return send(cached);
+    const url = tpl.replace('{s}', 'a').replace('{r}', '').replace('{z}', zi).replace('{x}', xi).replace('{y}', yi);
+    fetch(url, { headers: { 'User-Agent': 'W2K-2-Dashboard/1.0' }, signal: AbortSignal.timeout(8000) })
+      .then(async (r) => {
+        if (!r.ok || !/^image\//.test(r.headers.get('content-type') || '')) throw new Error(`tile server returned ${r.status}`);
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 2e6) throw new Error('tile too large');
+        fs.mkdir(path.dirname(file), { recursive: true }, (e) => { if (!e) fs.writeFile(file, buf, () => {}); });
+        send(buf);
+      })
+      .catch(() => { if (!err) return send(cached); res.writeHead(502); res.end(); });   // offline: fall back to an old copy if there is one
+  });
+}
+
 // ---------------------------------------------------------------- HTTP server
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.woff2': 'font/woff2' };
@@ -274,6 +306,8 @@ const server = http.createServer((req, res) => {
     return proxyDevice(p.slice('/api/device/'.length), url.searchParams.get('host') || config.host, res, url.searchParams.get('object'));
   }
   if (req.method !== 'GET') { res.writeHead(405); return res.end(); }
+  const tile = /^\/tiles\/(\w+)\/(\d+)\/(\d+)\/(\d+)$/.exec(p);
+  if (tile) return serveTile(tile[1], tile[2], tile[3], tile[4], res);
 
   if (sea) {   // single-executable build: files are embedded assets, keyed by their path under public/
     const key = p === '/' ? 'index.html' : decodeURIComponent(p).replace(/^\/+/, '');

@@ -44,8 +44,8 @@ The attribution shown on the map must remain visible.
 
 ## Roboto
 
-Requested at run time from Google Fonts when an internet connection is available (not
-bundled). Apache License 2.0. https://fonts.google.com/specimen/Roboto
+Bundled in `public/vendor/fonts/` (latin and latin-ext subsets). Copyright The Roboto Project Authors.
+Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0 - https://fonts.google.com/specimen/Roboto
 
 ## Node.js (packaged downloads only)
 
