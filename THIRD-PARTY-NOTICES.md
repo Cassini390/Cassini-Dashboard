@@ -1,6 +1,6 @@
 # Third-party notices
 
-The W2K-2 Dashboard includes or uses the following third-party software and data.
+Cassini includes or uses the following third-party software and data.
 
 ## Leaflet 1.9.4
 
@@ -55,5 +55,6 @@ their own licences (see https://github.com/nodejs/node/blob/main/LICENSE).
 
 ## Trademarks
 
-"Actisense" and the Actisense logo are trademarks of Active Research Limited. "NMEA 2000"
+Cassini is an independent project and is not an Actisense product. "Actisense" and "W2K-2" are trademarks of
+Active Research Limited, used only to identify the compatible hardware. "NMEA 2000"
 is a registered trademark of the National Marine Electronics Association.

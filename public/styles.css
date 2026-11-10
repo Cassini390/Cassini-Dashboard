@@ -1,4 +1,4 @@
-/* Actisense brand: Orange #db5d28 · Deep Blue #05223D · Muted Blue #576271 · NGX Blue #3399FF · Grey #888B8D · White
+/* Cassini dashboard styles. The live theme (purple primary, neutral surfaces) is defined in the "Cassini theme" block at the end of this file;
    Headings: Adelle Sans (used when installed / licensed) · Subheadings: Roboto Bold · Body: Roboto Regular */
 :root {
   --orange: #db5d28;
@@ -524,3 +524,52 @@ main:focus { outline: none; }
 .axis-t { white-space: nowrap; min-width: 38px; }
 .ranges { flex-wrap: nowrap; }
 .chart-box .ranges button, .charts2 .ranges button { padding: 4px 8px; min-height: 32px; font-size: 13.5px; }
+
+/* ================================================================== Cassini logo */
+.sidebar .logo { height: 58px; max-width: 100%; }
+.sidebar .brand { gap: 2px; }
+.wordmark { color: #3b0a91; }
+:root[data-theme="dark"] .wordmark { color: #d9ccff; }
+@media (max-width: 960px) { .sidebar .logo { height: 36px; } }
+
+/* ================================================================== Cassini theme
+   Purple (#3b0a91, from the logo) is the primary colour for buttons, switches and the active page.
+   Surfaces are neutral with a slight violet tint. Data uses blue; status uses green / amber / red. No orange. */
+:root {
+  --brand: #3b0a91;            /* borders, accents on light surfaces */
+  --brand-fill: #3b0a91;       /* filled buttons and switches (white text on top: 13:1) */
+  --orange: var(--brand); --orange-fill: var(--brand-fill); --deep-blue: var(--brand);   /* older rules keep working */
+  --bg: #f3f2f7; --card: #ffffff; --card-2: #f7f6fb; --line: #e1deeb; --track: #e8e5f0;
+  --text: #1c1633; --text-2: #5b5673; --text-3: #6a6580;
+  --accent: #6d28d9; --accent-text: #4c1d95;
+  --data: #1667c2;
+  --north: #c62828;
+  --shadow: 0 1px 2px rgba(28, 22, 51, .06), 0 4px 14px rgba(28, 22, 51, .06);
+}
+:root[data-theme="dark"] {
+  --brand: #8b6ff0; --brand-fill: #6d3fd6;      /* white text on the fill: 6.3:1 */
+  --bg: #0e0c18; --card: #181530; --card-2: #211d40; --line: #332d5c; --track: #2a2550;
+  --text: #ffffff; --text-2: #b9b3d6; --text-3: #a59fc4;
+  --accent: #a78bfa; --accent-text: #c4b5fd;
+  --data: #4da3ff;
+  --north: #ff6b6b;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 6px 18px rgba(0, 0, 0, .3);
+}
+/* night mode must keep its near-black surfaces (it is the dark theme shown through the red filter) */
+:root[data-night] { --bg: #000; --card: #0d0d0d; --card-2: #161616; --line: #3a3a3a; --track: #2a2a2a; }
+
+.dial .lbl.card-n { fill: var(--north); }                       /* north in red, as on a compass card */
+.dial .cog { fill: var(--accent); } .dial .aw { fill: var(--accent); } .legend .a { background: var(--accent); }
+.meter i.fuel { background: var(--good); }                     /* fuel green, water blue, waste slate */
+.meter i.waste { background: #6b7280; }
+.btn.primary:hover { filter: brightness(1.15); }
+.seg input:checked + span, .mini-seg button[aria-pressed="true"], .ranges button[aria-pressed="true"] { background: var(--brand-fill); color: #fff; }
+:root[data-theme="dark"] .seg input:checked + span, :root[data-theme="dark"] .mini-seg button[aria-pressed="true"], :root[data-theme="dark"] .ranges button[aria-pressed="true"] { background: var(--brand-fill); }
+.tabs button[aria-current="page"] { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sidebar { border-top-color: var(--brand-fill); }
+.ship path { fill: #1c1633; }
+:root[data-theme="dark"] .ship path { fill: #d9ccff; stroke: #181530; }
+:root[data-theme="dark"] .leaflet-control-attribution, :root[data-theme="dark"] .leaflet-control-scale-line { background: rgba(24, 21, 48, .85); color: #d3cdea; border-color: #b9b3d6; }
+:root[data-theme="dark"] .leaflet-bar a { background: #181530; color: #fff; border-color: #332d5c; }
+.alarm-bar { background: #8a5a00; }
+dialog::backdrop { background: rgba(14, 12, 24, .62); }

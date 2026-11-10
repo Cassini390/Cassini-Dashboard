@@ -1,6 +1,6 @@
-# Actisense W2K-2 Dashboard
+# Cassini
 
-A browser-based marine monitoring dashboard that receives live NMEA 2000 data
+**Cassini** is a browser-based marine monitoring dashboard that receives live NMEA 2000 data
 from an Actisense **W2K-2** over Wi-Fi (**TCP or UDP**, **N2K ASCII** format).
 
 ```
@@ -31,7 +31,7 @@ icon to connect to a gateway.
 node build.js
 ```
 
-creates `dist/W2K-Dashboard-<platform>/` and a `.zip` of it: a private copy of the Node.js runtime, the
+creates `dist/Cassini-<platform>/` and a `.zip` of it: a private copy of the Node.js runtime, the
 dashboard and a double-click launcher. The person using it needs nothing installed. Build on the platform
 you are targeting (the runtime copied is the one running the build).
 
@@ -39,11 +39,11 @@ you are targeting (the runtime copied is the one running the build).
 node build.js --exe
 ```
 
-additionally creates **one file**, `dist/W2K-Dashboard.exe`: the bridge, simulator and every dashboard file
+additionally creates **one file**, `dist/Cassini.exe`: the bridge, simulator and every dashboard file
 embedded in the Node.js runtime (Node's "single executable application" feature). Double-clicking it starts
 the bridge and opens the browser; settings are saved next to the exe. This step fetches the `postject` tool
 from npm the first time. Options: `--no-open`, `--lan`, `--port <n>`, `--demo`. The exe is not code-signed,
-so Windows SmartScreen will warn on first run until it is signed with an Actisense certificate.
+so Windows SmartScreen will warn on first run until it is signed with a code-signing certificate.
 
 ## Three ways to get data
 
@@ -113,10 +113,10 @@ add a decoder to `DECODERS` in `public/n2k.js`.
 - **Receive only.** The dashboard never transmits onto the NMEA 2000 bus and only
   makes read-only `GET` requests to the gateway's REST API (`about`, `info`,
   `wifi`, `installation`, `data_server_config`).
-- **Branding.** Colours and fonts follow the Actisense brand guidelines (Orange
-  `#db5d28`, Deep Blue `#05223D`, Muted Blue `#576271`, NGX Blue `#3399FF`; Roboto
-  for body/subheadings, Adelle Sans for headings when installed). Place the
-  official logo at `public/logo.svg` to replace the text wordmark.
+- **Branding.** The logo is `public/cassini_logo_bold.svg`; it is recoloured automatically for the dark theme.
+  The theme uses the logo purple (`#3b0a91`) for buttons, switches and the active page, blue for data, and
+  green / amber / red for status. The colours are CSS variables in the "Cassini theme" block at the end of
+  `public/styles.css`. Text is set in Roboto.
 - **Map.** The Navigation chart uses [Leaflet](https://leafletjs.com) 1.9.4 (BSD-2-Clause, bundled in
   `public/vendor/`) with [OpenStreetMap](https://www.openstreetmap.org/copyright) base tiles and the
   [OpenSeaMap](https://www.openseamap.org) seamark overlay. Both are free; the attribution shown on the map
@@ -138,5 +138,5 @@ add a decoder to `DECODERS` in `public/n2k.js`.
 ## Licence
 
 Released under the [MIT Licence](LICENSE). Third-party components and map data are credited in
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). "Actisense" and the Actisense logo are trademarks of
-Active Research Limited and are not covered by the MIT licence.
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Cassini is an independent project and is not an Actisense product. "Actisense" and "W2K-2" are trademarks of
+Active Research Limited, used here only to say which hardware Cassini works with.

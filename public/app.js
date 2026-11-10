@@ -1,4 +1,4 @@
-/* Actisense W2K-2 Dashboard - browser application.
+/* Cassini - NMEA 2000 dashboard for the Actisense W2K-2 - browser application.
  * Receives N2K ASCII lines from the local bridge (server.js) over Server-Sent Events,
  * decodes them (n2k.js) into a live value store and renders the instrument pages. */
 (() => {
@@ -526,7 +526,7 @@
         });
         map.on('dragstart', () => { follow = false; centre.hidden = false; });
         L.control.scale({ imperial: false }).addTo(map);
-        line = L.polyline([], { color: '#db5d28', weight: 3, opacity: 0.9 }).addTo(map);
+        line = L.polyline([], { color: '#7c3aed', weight: 3, opacity: 0.95 }).addTo(map);
         wptLine = L.polyline([], { color: '#1f7fe0', weight: 2, dashArray: '6 6' }).addTo(map);
         aisLayer = L.layerGroup().addTo(map);
         wpt = L.circleMarker([0, 0], { radius: 6, color: '#fff', weight: 2, fillColor: '#1f7fe0', fillOpacity: 1 });
@@ -1184,6 +1184,7 @@
     document.body.style.filter = flt;                                   // dialogs sit in the top layer, outside body, so they get it too
     document.querySelectorAll('dialog').forEach((d) => { d.style.filter = flt; });
     $('#themeIcon').setAttribute('d', THEME_ICON[mode]);
+    paintLogo();
     $('#themeBtn').title = `Theme: ${mode} (click to change)`; $('#themeBtn').setAttribute('aria-label', `Theme: ${mode}. Click to change`);
   }
   mq.addEventListener('change', applyTheme);
@@ -1377,7 +1378,7 @@
     btn.disabled = false;
   };
   $('#exportBtn').onclick = () => {
-    const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify({ app: 'w2k-dashboard', version: 1, settings: sharedSettings() }, null, 2)], { type: 'application/json' })), download: 'w2k-dashboard-settings.json' });
+    const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify({ app: 'cassini', version: 1, settings: sharedSettings() }, null, 2)], { type: 'application/json' })), download: 'cassini-settings.json' });
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
   $('#importBtn').onclick = () => $('#importFile').click();
@@ -1386,7 +1387,7 @@
     if (!file) return;
     try {
       const j = JSON.parse(await file.text());
-      if (j.app !== 'w2k-dashboard' || !j.settings || typeof j.settings !== 'object') throw new Error('not a dashboard settings file');
+      if (!['cassini', 'w2k-dashboard'].includes(j.app) || !j.settings || typeof j.settings !== 'object') throw new Error('not a dashboard settings file');
       applyShared(j.settings); saveSettings(); dlg.returnValue = 'saved'; dlg.close();
       toast('Settings imported: units, alarms, source priority and dashboard layout replaced.', 'good');
     } catch (ex) { const err = $('#settingsError'); err.textContent = `Could not import that file (${ex.message}).`; err.hidden = false; }
@@ -1451,23 +1452,34 @@
   // shared settings: take the bridge's copy if it has one, otherwise seed it from this browser
   fetch('/api/prefs').then((r) => r.json()).then((j) => { if (j.prefs) applyShared(j.prefs); else if (hadLocal) pushShared(); }).catch(() => {});
 
-  // Logo: exported SVGs often sit on a large empty artboard, which makes the artwork tiny at header height.
-  // Crop the viewBox to the artwork's real bounding box so any export fills the available height.
+  // Logo: exported SVGs often sit on a large empty artboard, so the viewBox is cropped to the artwork's real bounding box.
+  // The logo is dark purple, which disappears on the dark theme, so there it is recoloured: purple -> pale lavender,
+  // and its white highlights -> the background colour, so they still read as cut-outs.
+  const LOGO_DARK = [[/#3b0a91/gi, '#d9ccff'], [/#fff(?:fff)?\b/gi, '#181530']];
+  let logoSvg = null;
+  function paintLogo() {
+    const img = $('.logo'); if (!img || !logoSvg) return;
+    let src = logoSvg;
+    if (document.documentElement.dataset.theme === 'dark') for (const [from, to] of LOGO_DARK) src = src.replace(from, to);
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+  }
   (async () => {
     const img = $('.logo'); if (!img) return;
     try {
-      const r = await fetch('logo.svg'); if (!r.ok) return;
+      const r = await fetch(img.getAttribute('src')); if (!r.ok) return;
       const svg = new DOMParser().parseFromString(await r.text(), 'image/svg+xml').documentElement;
       if (svg.nodeName !== 'svg') return;
       const probe = document.importNode(svg, true);
       probe.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden';
       document.body.append(probe);
       const bb = probe.getBBox(); probe.remove();
-      if (!(bb.width > 0 && bb.height > 0)) return;
-      const pad = bb.height * 0.04;
-      svg.setAttribute('viewBox', `${bb.x - pad} ${bb.y - pad} ${bb.width + 2 * pad} ${bb.height + 2 * pad}`);
-      svg.removeAttribute('width'); svg.removeAttribute('height');
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+      if (bb.width > 0 && bb.height > 0) {
+        const pad = bb.height * 0.04;
+        svg.setAttribute('viewBox', `${bb.x - pad} ${bb.y - pad} ${bb.width + 2 * pad} ${bb.height + 2 * pad}`);
+        svg.removeAttribute('width'); svg.removeAttribute('height');
+      }
+      logoSvg = new XMLSerializer().serializeToString(svg);
+      paintLogo();
     } catch { /* keep the file as supplied */ }
   })();
   window.addEventListener('hashchange', () => { const id = location.hash.slice(1); if (PAGES[id] && id !== active) show(id); });

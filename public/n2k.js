@@ -1,5 +1,5 @@
 /*
- * Actisense "N2K ASCII" parser + NMEA 2000 PGN decoder.
+ * Cassini: Actisense "N2K ASCII" parser + NMEA 2000 PGN decoder.
  *
  *   A173321.107 23FF7 1F513 012F3070002F30709F
  *   A<hhmmss.ddd> <SS><DD><P> <PGN:5 hex> <data bytes, fast-packets pre-assembled>

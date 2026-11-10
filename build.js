@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Builds a no-install download:  dist/W2K-Dashboard-<platform>/  (+ a .zip on Windows)
+ * Builds a no-install download:  dist/Cassini-<platform>/  (+ a .zip on Windows)
  *
  * The folder contains a private copy of the Node.js runtime, the dashboard files and a launcher,
  * so the person using it does not need Node.js (or anything else) installed - they unzip it and
@@ -18,7 +18,7 @@ const { execFileSync } = require('child_process');
 
 const root = __dirname;
 const win = process.platform === 'win32';
-const name = `W2K-Dashboard-${win ? 'windows' : process.platform === 'darwin' ? 'mac' : process.platform}-${process.arch}`;
+const name = `Cassini-${win ? 'windows' : process.platform === 'darwin' ? 'mac' : process.platform}-${process.arch}`;
 const out = path.join(root, 'dist', name);
 
 fs.rmSync(out, { recursive: true, force: true });
@@ -26,7 +26,7 @@ fs.mkdirSync(path.join(out, 'app'), { recursive: true });
 
 // application files (never the developer's own config.json / prefs.json)
 for (const f of ['server.js', 'sim.js', 'history.js', 'README.md']) fs.copyFileSync(path.join(root, f), path.join(out, 'app', f));
-fs.cpSync(path.join(root, 'public'), path.join(out, 'app', 'public'), { recursive: true, filter: (src) => !/logo\.original\.svg$/.test(src) });
+fs.cpSync(path.join(root, 'public'), path.join(out, 'app', 'public'), { recursive: true });
 
 // private Node.js runtime + its licence
 const nodeName = win ? 'node.exe' : 'node';
@@ -37,21 +37,21 @@ if (nodeLicence) fs.copyFileSync(nodeLicence, path.join(out, 'NODEJS-LICENSE.txt
 
 // launcher
 if (win) {
-  fs.writeFileSync(path.join(out, 'Start W2K Dashboard.cmd'),
-    ['@echo off', 'title W2K-2 Dashboard', 'cd /d "%~dp0"', '"%~dp0node.exe" "%~dp0app\\server.js" --open %*', 'if errorlevel 1 pause', ''].join('\r\n'));
-  fs.writeFileSync(path.join(out, 'Start W2K Dashboard (share on network).cmd'),
-    ['@echo off', 'title W2K-2 Dashboard (shared on network)', 'cd /d "%~dp0"', '"%~dp0node.exe" "%~dp0app\\server.js" --open --lan %*', 'if errorlevel 1 pause', ''].join('\r\n'));
+  fs.writeFileSync(path.join(out, 'Start Cassini.cmd'),
+    ['@echo off', 'title Cassini', 'cd /d "%~dp0"', '"%~dp0node.exe" "%~dp0app\\server.js" --open %*', 'if errorlevel 1 pause', ''].join('\r\n'));
+  fs.writeFileSync(path.join(out, 'Start Cassini (share on network).cmd'),
+    ['@echo off', 'title Cassini (shared on network)', 'cd /d "%~dp0"', '"%~dp0node.exe" "%~dp0app\\server.js" --open --lan %*', 'if errorlevel 1 pause', ''].join('\r\n'));
 } else {
-  const sh = path.join(out, 'start-w2k-dashboard.command');
+  const sh = path.join(out, 'start-cassini.command');
   fs.writeFileSync(sh, '#!/bin/sh\ncd "$(dirname "$0")"\n./node app/server.js --open "$@"\n');
   fs.chmodSync(sh, 0o755);
 }
 
 fs.writeFileSync(path.join(out, 'READ ME FIRST.txt'), [
-  'Actisense W2K-2 Dashboard',
-  '=========================',
+  'Cassini - NMEA 2000 dashboard for the Actisense W2K-2',
+  '=====================================================',
   '',
-  win ? '1. Double-click "Start W2K Dashboard".' : '1. Double-click "start-w2k-dashboard.command".',
+  win ? '1. Double-click "Start Cassini".' : '1. Double-click "start-cassini.command".',
   '2. A small black window opens (leave it open) and the dashboard appears in your web browser.',
   '3. Click the connection button at the top of the dashboard to connect to your W2K-2.',
   '',
@@ -99,14 +99,14 @@ if (process.argv.includes('--exe')) {
   (function walk(d, rel) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) walk(path.join(d, e.name), r); else if (e.name !== 'logo.original.svg') assets[r] = path.join(d, e.name);
+      if (e.isDirectory()) walk(path.join(d, e.name), r); else assets[r] = path.join(d, e.name);
     }
   })(path.join(root, 'public'), '');
   const blob = path.join(work, 'sea-prep.blob');
   fs.writeFileSync(path.join(work, 'sea-config.json'), JSON.stringify({ main: path.join(work, 'main.js'), output: blob, disableExperimentalSEAWarning: true, assets }, null, 2));
   execFileSync(process.execPath, ['--experimental-sea-config', path.join(work, 'sea-config.json')], { stdio: 'inherit' });
   // 3. copy the runtime and inject the blob
-  const exe = path.join(root, 'dist', win ? 'W2K-Dashboard.exe' : 'w2k-dashboard');
+  const exe = path.join(root, 'dist', win ? 'Cassini.exe' : 'cassini');
   fs.copyFileSync(process.execPath, exe);
   const pj = ['--yes', 'postject', exe, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2'];
   if (process.platform === 'darwin') pj.push('--macho-segment-name', 'NODE_SEA');

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * W2K-2 Dashboard bridge
+ * Cassini bridge (NMEA 2000 dashboard for the Actisense W2K-2)
  * ----------------------
  * Browsers cannot open raw TCP or UDP sockets, so this small zero-dependency
  * Node server does it for them:
@@ -234,7 +234,7 @@ function serveTile(layer, z, x, y, res) {
     if (!err) { try { age = Date.now() - fs.statSync(file).mtimeMs; } catch { /* treat as stale */ } }
     if (!err && age < TILE_FRESH_MS) return send(cached);
     const url = tpl.replace('{s}', 'a').replace('{r}', '').replace('{z}', zi).replace('{x}', xi).replace('{y}', yi);
-    fetch(url, { headers: { 'User-Agent': 'W2K-2-Dashboard/1.0' }, signal: AbortSignal.timeout(8000) })
+    fetch(url, { headers: { 'User-Agent': 'Cassini-Dashboard/1.0' }, signal: AbortSignal.timeout(8000) })
       .then(async (r) => {
         if (!r.ok || !/^image\//.test(r.headers.get('content-type') || '')) throw new Error(`tile server returned ${r.status}`);
         const buf = Buffer.from(await r.arrayBuffer());
@@ -326,7 +326,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(HTTP_PORT, BIND, () => {
-  console.log(`W2K-2 Dashboard running at http://${BIND === '0.0.0.0' ? 'localhost' : BIND}:${HTTP_PORT}`);
+  console.log(`Cassini is running at http://${BIND === '0.0.0.0' ? 'localhost' : BIND}:${HTTP_PORT}`);
   if (BIND === '0.0.0.0') console.log('LAN access enabled - open http://<this-computer-ip>:' + HTTP_PORT + ' from other devices');
   console.log('Keep this window open while you use the dashboard. Close it (or press Ctrl+C) to stop.');
   startSource();
