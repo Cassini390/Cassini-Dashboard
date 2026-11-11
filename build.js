@@ -106,9 +106,18 @@ if (process.argv.includes('--exe')) {
   fs.writeFileSync(path.join(work, 'sea-config.json'), JSON.stringify({ main: path.join(work, 'main.js'), output: blob, disableExperimentalSEAWarning: true, assets }, null, 2));
   execFileSync(process.execPath, ['--experimental-sea-config', path.join(work, 'sea-config.json')], { stdio: 'inherit' });
   // 3. copy the runtime and inject the blob
-  const exe = path.join(root, 'dist', win ? 'Cassini.exe' : 'cassini');
+  const named = process.argv.indexOf('--exe-name');   // optional: --exe-name <file>, e.g. to build while Cassini.exe is running
+  const exe = path.join(root, 'dist', named > 0 && process.argv[named + 1] ? path.basename(process.argv[named + 1]) : win ? 'Cassini.exe' : 'cassini');
   fs.copyFileSync(process.execPath, exe);
-  const pj = ['--yes', 'postject', exe, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2'];
+  // Windows: give the exe the Cassini icon and name (must happen before the blob is injected).
+  // Needs rcedit (https://github.com/electron/rcedit/releases) saved as tools/rcedit/rcedit-x64.exe; skipped with a note if absent.
+  const rcedit = path.join(root, 'tools', 'rcedit', 'rcedit-x64.exe'), ico = path.join(root, 'icon', 'cassini.ico');
+  if (win && fs.existsSync(rcedit) && fs.existsSync(ico)) {
+    execFileSync(rcedit, [exe, '--set-icon', ico, '--set-version-string', 'FileDescription', 'Cassini - NMEA 2000 dashboard',
+      '--set-version-string', 'ProductName', 'Cassini', '--set-version-string', 'OriginalFilename', 'Cassini.exe', '--set-version-string', 'InternalName', 'cassini'], { stdio: 'inherit' });
+    console.log('Icon  set from icon/cassini.ico');
+  } else if (win) console.log('Icon  skipped: tools/rcedit/rcedit-x64.exe or icon/cassini.ico not found (the exe keeps the Node.js icon)');
+  const pj =['--yes', 'postject', exe, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2'];
   if (process.platform === 'darwin') pj.push('--macho-segment-name', 'NODE_SEA');
   execFileSync(win ? 'npx.cmd' : 'npx', pj, { stdio: 'inherit', shell: win });
   console.log(`Exe   ${exe} (${size(exe)})`);

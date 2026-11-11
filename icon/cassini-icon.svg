@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Cassini browser-tab icon (the one currently embedded in public/index.html), scaled up to 512 x 512 for editing.
+     Three shapes: purple rounded square, white planet, white ring. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect id="background" width="512" height="512" rx="112" fill="#3b0a91"/>
+  <circle id="planet" cx="256" cy="256" r="112" fill="#ffffff"/>
+  <ellipse id="ring" cx="256" cy="256" rx="224" ry="72" fill="none" stroke="#ffffff" stroke-width="32" transform="rotate(-20 256 256)"/>
+</svg>

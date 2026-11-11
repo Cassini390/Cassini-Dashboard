@@ -4,6 +4,7 @@ prefs.json
 history.json
 tile-cache/
 
-# build output (publish via Releases instead)
+# build output (publish via Releases instead) and downloaded build tools
 dist/
+tools/
 node_modules/

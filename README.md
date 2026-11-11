@@ -41,7 +41,9 @@ node build.js --exe
 
 additionally creates **one file**, `dist/Cassini.exe`: the bridge, simulator and every dashboard file
 embedded in the Node.js runtime (Node's "single executable application" feature). Double-clicking it starts
-the bridge and opens the browser; settings are saved next to the exe. This step fetches the `postject` tool
+the bridge and opens the browser; settings are saved next to the exe. On Windows the exe is given the Cassini icon and name
+from `icon/cassini.ico` if the `rcedit` tool is present at `tools/rcedit/rcedit-x64.exe` (download it from
+https://github.com/electron/rcedit/releases; it is not stored in the repository). `node icon/make-icon.js` regenerates the icon. This step fetches the `postject` tool
 from npm the first time. Options: `--no-open`, `--lan`, `--port <n>`, `--demo`. The exe is not code-signed,
 so Windows SmartScreen will warn on first run until it is signed with a code-signing certificate.
 
