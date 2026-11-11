@@ -653,10 +653,14 @@
   }
   const tankList = () => dyn(h('div', 'stack'), () => ids('tank'), tankRow, 'No tank level data (PGN 127505) received.');
 
+  /** a gauge warning zone taken from an alarm on the Alarms page: from its threshold to the end of the scale, in the alarm's
+   *  severity colour. Returns null when the alarm is switched off, so the gauge then shows no zone. */
+  const alarmZone = (alarm, end, side, mul = 1) => { const a = al(alarm); if (!a.on) return null; const v = a.value * mul; return side === 'below' ? [Math.min(end, v), v, a.level] : [v, Math.max(end, v), a.level]; };
   const batGauge = (id) => gauge({ label: 'Voltage', unit: 'V', digits: 2, get: () => get(`bat.${id}.v`),
     min: () => 10 * batNominal(get(`bat.${id}.v`)), max: () => 16 * batNominal(get(`bat.${id}.v`)),
-    zones: () => { const n = batNominal(get(`bat.${id}.v`)); return [[10 * n, 11.8 * n, 'crit'], [11.8 * n, 12.1 * n, 'warn'], [15.2 * n, 16 * n, 'warn']]; } });
-  const rpmGauge = (id) => gauge({ label: 'RPM', unit: 'rpm', min: 0, max: () => ((get(`eng.${id}.rpm`) || 0) > 3900 ? 8000 : 4000), get: () => get(`eng.${id}.rpm`) });
+    zones: () => { const n = batNominal(get(`bat.${id}.v`)); return [alarmZone('batLow', 10 * n, 'below', n), alarmZone('batHigh', 16 * n, 'above', n)].filter(Boolean); } });
+  const rpmGauge = (id) => gauge({ label: 'RPM', unit: 'rpm', min: 0, max: () => ((get(`eng.${id}.rpm`) || 0) > 3900 ? 8000 : 4000), get: () => get(`eng.${id}.rpm`),
+    zones: () => [alarmZone('overRev', (get(`eng.${id}.rpm`) || 0) > 3900 ? 8000 : 4000, 'above')].filter(Boolean) });
 
   function alertList() {
     const el = h('div', 'alerts'); let sig = null;
@@ -669,8 +673,8 @@
     return el;
   }
 
-  const coolGauge = (id) => gauge({ label: 'Coolant', unit: () => unit('temp'), get: () => get(`eng.${id}.coolT`), show: cTemp, min: 40, max: 120, zones: [[98, 105, 'warn'], [105, 120, 'crit']] });
-  const oilGauge = (id) => gauge({ label: 'Oil press', unit: () => unit('pressure'), digits: () => (settings.pressure === 'kpa' ? 0 : 1), get: () => get(`eng.${id}.oilP`), show: (v) => conv('pressure', v), min: 0, max: 700, zones: [[0, 100, 'warn']] });
+  const coolGauge = (id) => gauge({ label: 'Coolant', unit: () => unit('temp'), get: () => get(`eng.${id}.coolT`), show: cTemp, min: 40, max: 120, zones: () => [alarmZone('coolant', 120, 'above')].filter(Boolean) });
+  const oilGauge = (id) => gauge({ label: 'Oil press', unit: () => unit('pressure'), digits: () => (settings.pressure === 'kpa' ? 0 : 1), get: () => get(`eng.${id}.oilP`), show: (v) => conv('pressure', v), min: 0, max: 700, zones: () => [alarmZone('oilLow', 0, 'below')].filter(Boolean) });
   const sogGauge = () => gauge({ label: 'SOG', unit: () => unit('speed'), digits: 1, get: () => get('sog'), show: (v) => conv('speed', v), min: 0,
     max: () => { const d = conv('speed', maxSog) * 1.15; return [10, 20, 40, 80, 160].find((x) => x >= d) / UNITS.speed[settings.speed][0]; } });
   const depthShown = () => { const d = get('depth'); return d == null ? null : settings.depthRef === 'transducer' ? d : d + (get('depth.offset') || 0); };   // below keel / waterline (using the sender's offset) or below the transducer
@@ -945,8 +949,8 @@
           chips.replaceChildren(...(s1 == null ? [h('span', { class: 'chip', text: 'No status reported' })] : on.length ? on.map((x) => h('span', { class: 'chip crit', text: x })) : [h('span', { class: 'chip good', text: 'No warnings' })]));
         });
         return card([engName(id, all), t(null, () => get(`eng.${id}.gear`) || '', 'small')], '', h('div', 'gauges', rpmGauge(id),
-          gauge({ label: 'Coolant', unit: () => unit('temp'), get: () => get(`eng.${id}.coolT`), show: cTemp, min: 40, max: 120, zones: [[98, 105, 'warn'], [105, 120, 'crit']] }),
-          gauge({ label: 'Oil press', unit: () => unit('pressure'), digits: () => (settings.pressure === 'kpa' ? 0 : 1), get: () => get(`eng.${id}.oilP`), show: (v) => conv('pressure', v), min: 0, max: 700, zones: [[0, 100, 'warn']] })),
+          coolGauge(id),
+          oilGauge(id)),
         kv([['Engine load', () => fu(get(`eng.${id}.load`), 0, '%')], ['Fuel rate', () => fu(conv('volume', get(`eng.${id}.fuelRate`)), 1, `${unit('volume')}/h`)],
           ['Alternator', () => fu(get(`eng.${id}.altV`), 1, 'V')], ['Oil temperature', () => fTemp(get(`eng.${id}.oilT`), 0)], ['Boost pressure', () => fPres(get(`eng.${id}.boost`))],
           ['Fuel pressure', () => fPres(get(`eng.${id}.fuelP`))], ['Coolant pressure', () => fPres(get(`eng.${id}.coolP`))], ['Trim', () => fu(get(`eng.${id}.trim`), 0, '%')],
