@@ -117,7 +117,7 @@ add a decoder to `DECODERS` in `public/n2k.js`.
   `wifi`, `installation`, `data_server_config`).
 - **Branding.** The logo is `public/cassini_logo_bold.svg`; it is recoloured automatically for the dark theme.
   The theme uses the logo purple (`#3b0a91`) for buttons, switches and the active page, blue for data, and
-  green / amber / red for status. The colours are CSS variables in the "Cassini theme" block at the end of
+  green / amber / red for status. The colours are CSS variables in the "theme colours" block at the top of
   `public/styles.css`. Text is set in Roboto.
 - **Map.** The Navigation chart uses [Leaflet](https://leafletjs.com) 1.9.4 (BSD-2-Clause, bundled in
   `public/vendor/`) with [OpenStreetMap](https://www.openstreetmap.org/copyright) base tiles and the
@@ -125,17 +125,40 @@ add a decoder to `DECODERS` in `public/n2k.js`.
   must stay visible. Tiles are fetched from the internet by the browser - with no connection the chart
   switches to the built-in offline plot. The public OSM tile servers are donation-funded and have a
   [usage policy](https://operations.osmfoundation.org/policies/tiles/) (no bulk downloading, no guaranteed
-  availability); if this is distributed widely, point the tile URL in `public/app.js` at your own or a
+  availability); if this is distributed widely, point the tile URL in `public/js/chart.js` at your own or a
   commercial tile service.
 - **Offline use.** Everything else is served locally, including the Roboto font (bundled in `public/vendor/fonts/`).
 - Not a substitute for certified navigation instruments.
 
-## Files
+## How the code is organised
 
 - `server.js` – bridge: static files, TCP/UDP client, SSE stream, REST proxy
 - `sim.js` – demo simulator (N2K ASCII generator)
-- `public/n2k.js` – N2K ASCII parser and PGN decoders
-- `public/app.js`, `styles.css`, `index.html` – the dashboard
+- `history.js` – stored history for the 24 h / 7 d / 30 d charts and the track
+- `public/n2k.js` – N2K ASCII parser and PGN decoders (shared by the bridge and the browser)
+- `public/index.html`, `public/styles.css` – the page and its styling
+- `public/js/` – the browser application, one file per job:
+
+  | File | What it holds |
+  | --- | --- |
+  | `core.js` | DOM helpers, settings (shared and per-device), unit conversion |
+  | `store.js` | live value store, staleness, source arbitration, derived values, names |
+  | `alarms.js` | alarm definitions, evaluation, acknowledgement, audible alert |
+  | `widgets.js` | arc gauge, compass, wind dial, history charts |
+  | `chart.js` | Navigation map, offline plot, AIS targets, track card |
+  | `instruments.js` | ready-made gauges, tank rows, history chart boxes, custom names |
+  | `panels.js` | My Dashboard (the customisable panel grid) |
+  | `pages.js` | the fixed pages |
+  | `gateway.js` | gateway status from the W2K-2 REST API |
+  | `shell.js` | sidebar navigation, rendering loop, theme, status messages |
+  | `connection.js` | bridge event stream, direct WebSocket source, periodic work |
+  | `settings-dialog.js` | the Settings dialog |
+  | `main.js` | logo and start-up |
+
+  There is no build step and no module system: these are plain scripts loaded by `index.html` in the order above,
+  and their top-level `const`, `let` and `function` declarations share one scope. That keeps the page working when
+  it is opened straight from disk (`file://`), where JavaScript modules are not allowed. The cost is that names must
+  be unique across the files, and a file may only *run* code at load time that uses things from files listed before it.
 
 ## Licence
 
