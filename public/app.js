@@ -154,6 +154,9 @@
     for (const k in D) if (k.startsWith(p) && get(k) != null) out.add(k.slice(p.length).split('.')[0]);
     return [...out].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }
+  let wipedAt = 0;   // when the data was last cleared by hand: stored-history charts fetched before this reload
+  /** forget everything received so far (values, instances, sources, AIS targets, track, traffic counters); settings are untouched */
+  function wipeData() { resetData(); histTrack = []; wipedAt = Date.now(); }
   function resetData() { aisTargets = new Map(); D = {}; H = {}; track = []; trackT = []; trackDist = 0; pgnStats = new Map(); srcStats = new Map(); rawLog = []; badLines = 0; maxSog = 0; groupSrcs = new Map(); groupActive = new Map(); }
 
   function ingest(line) {
@@ -417,7 +420,7 @@
     const chips = rangeChips((r) => { range = r; hist = null; fetchedAt = 0; sig = ''; });
     const el = h('div', 'spark', h('div', 'spark-plot', s('svg', { viewBox: '0 0 300 80', preserveAspectRatio: 'none' }, area, thrG, line), thrL, hi, lo, msg), h('div', 'spark-axis', t0l, chips, t1l));
     reg(() => {
-      if (range !== 'live' && Date.now() - fetchedAt > 60000) {
+      if (range !== 'live' && (Date.now() - fetchedAt > 60000 || fetchedAt < wipedAt)) {
         fetchedAt = Date.now(); const r = range;
         fetch(`/api/history?key=${encodeURIComponent(key)}&range=${r}`).then((x) => x.json()).then((j) => { if (range === r) { hist = (j.points || []).map(([t, v]) => ({ t, v })); sig = ''; } }).catch(() => { if (range === r) { hist = []; sig = ''; } });
       }
@@ -609,7 +612,7 @@
     const cur = () => (range === 'live' ? { pts: track.map((p, i) => [trackT[i], p[0], p[1]]), dist: trackDist } : hist || { pts: [], dist: 0 });
     const chips = rangeChips((r) => { range = r; hist = null; fetchedAt = 0; if (r === 'live') histTrack = []; });
     reg(() => {
-      if (range === 'live' || Date.now() - fetchedAt < 60000) return;
+      if (range === 'live' || (Date.now() - fetchedAt < 60000 && fetchedAt >= wipedAt)) return;
       fetchedAt = Date.now(); const r = range;
       fetch(`/api/track?range=${r}`).then((x) => x.json()).then((j) => { if (range !== r) return; const pts = j.points || []; hist = { pts, dist: dist(pts) }; histTrack = pts.map((p) => [p[1], p[2]]); }).catch(() => { if (range === r) hist = { pts: [], dist: 0 }; });
     });
@@ -1263,6 +1266,7 @@
       if (key !== connKey) { if (connKey) resetData(); connKey = key; pollDevice(); }
     });
     es.addEventListener('n2k', (e) => { if (!direct) for (const line of JSON.parse(e.data)) ingest(line); });
+    es.addEventListener('clear', () => wipeData());   // someone pressed "Clear all data"
     es.addEventListener('prefs', (e) => {   // another device changed the shared settings
       const m = JSON.parse(e.data);
       if (m.from === clientId || editMode || (document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName))) return;
@@ -1381,6 +1385,16 @@
     } catch { out.className = 'test-result bad'; out.textContent = 'The dashboard bridge did not answer - is server.js still running?'; }
     btn.disabled = false;
   };
+  // "Clear all data": asks for a second click, then wipes this browser's data and the bridge's stored history
+  { const btn = $('#clearDataBtn'), label = btn.textContent; let armed = 0;
+    const disarm = () => { clearTimeout(armed); armed = 0; btn.textContent = label; btn.classList.remove('danger'); };
+    btn.onclick = async () => {
+      if (!armed) { btn.textContent = 'Click again to clear'; btn.classList.add('danger'); armed = setTimeout(disarm, 5000); return; }
+      disarm(); wipeData();
+      let stored = standalone;
+      if (!standalone) try { stored = (await fetch('/api/clear', { method: 'POST' })).ok; } catch { stored = false; }
+      toast(stored ? 'All received data cleared.' : 'Live data cleared here, but the dashboard bridge did not answer, so its stored history was not cleared.', stored ? 'good' : 'warn');
+    }; }
   $('#exportBtn').onclick = () => {
     const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify({ app: 'cassini', version: 1, settings: sharedSettings() }, null, 2)], { type: 'application/json' })), download: 'cassini-settings.json' });
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);

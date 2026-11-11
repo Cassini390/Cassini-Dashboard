@@ -292,6 +292,11 @@ const server = http.createServer((req, res) => {
   }
   if (p === '/api/history' && req.method === 'GET') return json(res, 200, { key: url.searchParams.get('key'), points: history.query(String(url.searchParams.get('key')), url.searchParams.get('range')) });
   if (p === '/api/track' && req.method === 'GET') return json(res, 200, { points: history.track(url.searchParams.get('range')) });
+  if (p === '/api/clear' && req.method === 'POST') {   // forget all received data: stored history + every connected browser's live data
+    history.clear(history.tag); history.save();
+    broadcast('clear', {});
+    return json(res, 200, { ok: true });
+  }
   if (p === '/api/prefs' && req.method === 'GET') return json(res, 200, { prefs });
   if (p === '/api/prefs' && req.method === 'PUT') {
     return readBody(req, 262144, (b) => {

@@ -111,6 +111,13 @@
           <input type="file" id="importFile" accept="application/json,.json" hidden>
         </div>
       </fieldset>
+      <fieldset>
+        <legend>Received data</legend>
+        <p class="hint">Forgets everything received so far: values, engine, battery and tank instances, data sources, AIS targets, the track and the stored history charts. Use it before testing a new data stream. Your settings, alarms and custom names are kept.</p>
+        <div class="row wrap">
+          <button type="button" class="btn" id="clearDataBtn">Clear all data</button>
+        </div>
+      </fieldset>
       <p class="error" id="settingsError" hidden></p>
       <div class="actions">
         <button type="button" class="btn ghost" id="settingsCancel">Cancel</button>

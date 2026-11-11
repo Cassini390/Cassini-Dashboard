@@ -574,3 +574,6 @@ main:focus { outline: none; }
 .alarm-bar { background: #8a5a00; }
 dialog::backdrop { background: rgba(14, 12, 24, .62); }
 .sidebar .brand { gap: 6px; padding-top: 6px; }
+
+/* "Clear all data": the button turns red while it waits for the confirming second click */
+.btn.danger, .btn.danger:hover { background: var(--crit); border-color: var(--crit); color: #fff; }
