@@ -113,8 +113,15 @@ if (process.argv.includes('--exe')) {
   // Needs rcedit (https://github.com/electron/rcedit/releases) saved as tools/rcedit/rcedit-x64.exe; skipped with a note if absent.
   const rcedit = path.join(root, 'tools', 'rcedit', 'rcedit-x64.exe'), ico = path.join(root, 'icon', 'cassini.ico');
   if (win && fs.existsSync(rcedit) && fs.existsSync(ico)) {
-    execFileSync(rcedit, [exe, '--set-icon', ico, '--set-version-string', 'FileDescription', 'Cassini - NMEA 2000 dashboard',
-      '--set-version-string', 'ProductName', 'Cassini', '--set-version-string', 'OriginalFilename', 'Cassini.exe', '--set-version-string', 'InternalName', 'cassini'], { stdio: 'inherit' });
+    const rcArgs = [exe, '--set-icon', ico, '--set-version-string', 'FileDescription', 'Cassini - NMEA 2000 dashboard',
+      '--set-version-string', 'ProductName', 'Cassini', '--set-version-string', 'OriginalFilename', 'Cassini.exe', '--set-version-string', 'InternalName', 'cassini'];
+    // A freshly copied exe is often still being scanned by antivirus, which makes rcedit fail with "Unable to commit changes": retry.
+    for (let attempt = 1; ; attempt++) {
+      try { execFileSync(rcedit, rcArgs, { stdio: 'pipe' }); break; } catch (e) {
+        if (attempt >= 8) throw new Error(`rcedit could not update ${exe} after ${attempt} attempts: ${String(e.stderr || e.message).trim()}`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);   // wait 1.5 s
+      }
+    }
     console.log('Icon  set from icon/cassini.ico');
   } else if (win) console.log('Icon  skipped: tools/rcedit/rcedit-x64.exe or icon/cassini.ico not found (the exe keeps the Node.js icon)');
   const pj =['--yes', 'postject', exe, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2'];
