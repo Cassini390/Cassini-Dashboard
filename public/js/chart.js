@@ -63,8 +63,15 @@ function chartView() {
     if (settings.navView !== 'map' || !window.L) return;
     const w = mapEl.clientWidth + mapEl.clientHeight * 10000; if (!mapEl.clientWidth) return;
     if (!map) {
-      map = L.map(mapEl, { worldCopyJump: true }).setView([30, 0], 2); leafMaps.push(map);
       const custom = settings.tiles && /^https:\/\//.test(settings.tiles.url || '') ? settings.tiles : null;
+      // Opened straight from disk: the page sends no referrer, and the OpenStreetMap servers refuse such requests (they answer
+      // with an "Access blocked" picture, which does not count as an error). So do not ask them; explain instead.
+      if (standalone && !custom) {
+        if (!mapEl.firstChild) mapEl.append(h('div', 'map-blocked', h('p', { text: 'The OpenStreetMap servers do not supply map tiles to a page opened straight from a file.' }),
+          h('p', { class: 'hint', text: 'To see the map, start Cassini with its launcher (or Cassini.exe) and open the address it shows, or set your own tile provider in Settings under Map tiles. The Offline plot works here.' })));
+        return;
+      }
+      map = L.map(mapEl, { worldCopyJump: true }).setView([30, 0], 2); leafMaps.push(map);
       const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       const base = L.tileLayer(standalone ? (custom ? custom.url : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png') : '/tiles/base/{z}/{x}/{y}', { maxZoom: 19, className: custom ? '' : 'base-tiles',
         attribution: custom ? esc(custom.attribution || 'Map tiles: custom provider') : '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(map);
