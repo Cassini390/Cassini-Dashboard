@@ -211,6 +211,7 @@ const PAGES = {
       card(['NMEA 2000 devices', h('small', { text: 'sources seen in the data stream' })], 'c8', h('div', 'tbl-wrap', h('table', null, h('thead', null, h('tr', null, ['Source', 'Manufacturer', 'Model', 'Firmware', 'Messages', 'Last seen'].map((x, i) => h('th', { class: i === 4 ? 'num' : null, text: x })))), devBody))),
       card(['PGN traffic', t(null, () => `${pgnStats.size} PGNs · ${conn.rate || 0} msg/s${badLines ? ` · ${badLines} unparsed lines` : ''}`, 'small')], 'c7', h('div', 'tbl-wrap', h('table', null, h('thead', null, h('tr', null, ['PGN', 'Description', 'Sources', 'Count', 'Rate', ''].map((x, i) => h('th', { class: i === 3 || i === 4 ? 'num' : null, text: x })))), pgnBody))),
       card(['Raw N2K ASCII', pause], 'c5', logFilter, log),
+      logsCard(),
     ];
   }],
 };

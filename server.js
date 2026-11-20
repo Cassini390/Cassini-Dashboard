@@ -195,12 +195,14 @@ function readBody(req, limit, cb) {
 
 // ---------------------------------------------------------------- device REST proxy (GET, read-only)
 const DEVICE_ENDPOINTS = new Set(['about', 'info', 'wifi', 'installation', 'sensei_stats', 'data_server_config',
-  'data_server_status', 'data_routing', 'nmea2000_info', 'can', 'date_time']);
+  'data_server_status', 'data_routing', 'nmea2000_info', 'can', 'date_time', 'paths', 'data_logs', 'data_logging_config']);
+const DEVICE_QUERY = ['object', 'method', 'folder'];   // query parameters passed on to the gateway, e.g. data_logs?method=fileList&folder=EBL000003
 
-function proxyDevice(endpoint, host, res, object) {
+function proxyDevice(endpoint, host, res, params) {
   if (!DEVICE_ENDPOINTS.has(endpoint)) return json(res, 404, { error: 'endpoint not allowed' });
   if (!HOST_RE.test(host || '')) return json(res, 400, { error: 'no gateway host configured' });
-  const query = object && /^\w{1,32}$/.test(object) ? `?object=${object}` : '';   // e.g. data_routing?object=data_tx
+  const q = DEVICE_QUERY.filter((k) => /^[\w-]{1,32}$/.test(params.get(k) || '')).map((k) => `${k}=${params.get(k)}`);
+  const query = q.length ? `?${q.join('&')}` : '';
   const req = http.get({ host, port: 80, path: `/api/${endpoint}${query}`, timeout: 4000 }, (r) => {
     let body = '';
     r.setEncoding('utf8');
@@ -212,6 +214,37 @@ function proxyDevice(endpoint, host, res, object) {
   });
   req.on('timeout', () => req.destroy(new Error('timeout')));
   req.on('error', (e) => { if (!res.headersSent) json(res, 502, { error: e.code || e.message }); });
+}
+
+/** Streams one EBL log file from the gateway's SD card to the browser (GET, read-only).
+ *  Only a log folder name and an .ebl file name are accepted; where the logs live is asked from the gateway (/api/paths). */
+function proxyDeviceFile(host, folder, file, res) {
+  if (!HOST_RE.test(host || '')) return json(res, 400, { error: 'no gateway host configured' });
+  if (!/^EBL\d{1,10}$/.test(folder || '') || !/^[\w-]{1,40}\.ebl$/.test(file || '')) return json(res, 400, { error: 'not a log file' });
+  const fail = (e) => { if (!res.headersSent) json(res, 502, { error: e.code || e.message }); else res.destroy(); };
+  const paths = http.get({ host, port: 80, path: '/api/paths', timeout: 4000 }, (r) => {
+    let body = '';
+    r.setEncoding('utf8');
+    r.on('data', (d) => { body += d; if (body.length > 1e5) paths.destroy(); });
+    r.on('end', () => {
+      let base = null;
+      try { base = (JSON.parse(body).paths.find((x) => x.name === 'ebl_logs') || {}).path; } catch { /* handled below */ }
+      if (!/^\/[\w/-]{1,100}$/.test(base || '')) return fail(new Error('the gateway did not report a log folder'));
+      const dl = http.get({ host, port: 80, path: `/api/download?file_name=${base}/${folder}/${file}` }, (f) => {
+        if (f.statusCode !== 200) { f.resume(); return fail(new Error(`device returned ${f.statusCode}`)); }
+        const head = { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${file}"`, 'Cache-Control': 'no-store' };
+        if (f.headers['content-length']) head['Content-Length'] = f.headers['content-length'];
+        res.writeHead(200, head);
+        f.pipe(res);
+        f.on('error', fail);
+      });
+      dl.setTimeout(15000, () => dl.destroy(new Error('timeout')));   // no data for 15 s
+      dl.on('error', fail);
+      res.on('close', () => dl.destroy());                             // browser cancelled the download
+    });
+  });
+  paths.on('timeout', () => paths.destroy(new Error('timeout')));
+  paths.on('error', fail);
 }
 
 // ---------------------------------------------------------------- map tiles: caching proxy
@@ -308,7 +341,10 @@ const server = http.createServer((req, res) => {
     });
   }
   if (p.startsWith('/api/device/') && req.method === 'GET') {
-    return proxyDevice(p.slice('/api/device/'.length), url.searchParams.get('host') || config.host, res, url.searchParams.get('object'));
+    return proxyDevice(p.slice('/api/device/'.length), url.searchParams.get('host') || config.host, res, url.searchParams);
+  }
+  if (p === '/api/device-file' && req.method === 'GET') {
+    return proxyDeviceFile(url.searchParams.get('host') || config.host, url.searchParams.get('folder'), url.searchParams.get('file'), res);
   }
   if (req.method !== 'GET') { res.writeHead(405); return res.end(); }
   const tile = /^\/tiles\/(\w+)\/(\d+)\/(\d+)\/(\d+)$/.exec(p);

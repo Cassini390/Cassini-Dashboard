@@ -82,7 +82,7 @@ reconnects automatically.
 | Environment | Apparent & true wind (true is calculated if not on the network), barometer + trend, temperatures, humidity |
 | Alarms | Active alarms; enable/disable each alarm, set its trigger threshold and severity; optional sound on new critical alarms |
 | Sources | Choose which source address to prioritise when several devices send the same data (automatic fail-over if it stops); custom names for engines, batteries and tanks |
-| Network | Gateway status (W2K-2 REST API), devices on the bus, PGN traffic table, raw N2K ASCII log |
+| Network | Gateway status (W2K-2 REST API), devices on the bus, PGN traffic table, raw N2K ASCII log, and the gateway's EBL log files on its SD card (list and download) |
 
 - **Themes:** light, dark and a red-only **night** mode, plus a brightness control (per device).
 - **Alarm bar:** an active alarm shows on every page until acknowledged; critical alarms flash and can beep.
@@ -114,7 +114,8 @@ add a decoder to `DECODERS` in `public/n2k.js`.
 
 - **Receive only.** The dashboard never transmits onto the NMEA 2000 bus and only
   makes read-only `GET` requests to the gateway's REST API (`about`, `info`,
-  `wifi`, `installation`, `data_server_config`).
+  `wifi`, `installation`, `data_server_config`, `data_logs`, `paths`) and, when you click a download,
+  fetches that one log file. It never logs in to the gateway and never changes or deletes anything on it.
 - **Branding.** The logo is `public/cassini_logo_bold.svg`; it is recoloured automatically for the dark theme.
   The theme uses the logo purple (`#3b0a91`) for buttons, switches and the active page, blue for data, and
   green / amber / red for status. The colours are CSS variables in the "theme colours" block at the top of
@@ -149,7 +150,7 @@ add a decoder to `DECODERS` in `public/n2k.js`.
   | `instruments.js` | ready-made gauges, tank rows, history chart boxes, custom names |
   | `panels.js` | My Dashboard (the customisable panel grid) |
   | `pages.js` | the fixed pages |
-  | `gateway.js` | gateway status from the W2K-2 REST API |
+  | `gateway.js` | gateway status and log files from the W2K-2 REST API |
   | `shell.js` | sidebar navigation, rendering loop, theme, status messages |
   | `connection.js` | bridge event stream, direct WebSocket source, periodic work |
   | `settings-dialog.js` | the Settings dialog |

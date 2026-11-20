@@ -392,6 +392,7 @@ dialog#addPanel { width: min(760px, calc(100vw - 24px)); }
 .btn.primary { background: var(--brand-fill); border-color: var(--brand-fill); color: #fff; }
 .btn.primary:hover { filter: brightness(1.15); }
 .btn.sm { min-height: 40px; padding: 6px 14px; font-size: 15px; }
+a.btn { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }                /* a link that looks like a button (file downloads) */
 .btn.danger, .btn.danger:hover { background: var(--crit); border-color: var(--crit); color: #fff; }   /* "Clear all data" while it waits for the confirming second click */
 :focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
 dialog { border: 1px solid var(--line); border-radius: 16px; padding: 0; background: var(--card); color: var(--text); width: min(620px, calc(100vw - 24px)); box-shadow: 0 20px 60px rgba(0, 0, 0, .35); }
