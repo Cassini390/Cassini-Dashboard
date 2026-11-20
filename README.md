@@ -1,10 +1,11 @@
 # Cassini
 
 **Cassini** is a browser-based marine monitoring dashboard that receives live NMEA 2000 data
-from an Actisense **W2K-2** over Wi-Fi (**TCP or UDP**, **N2K ASCII** format).
+from an Actisense **W2K-2** over Wi-Fi (**TCP, UDP or WebSocket**, **N2K ASCII** format).
 
 ```
 W2K-2 data server ──TCP/UDP, N2K ASCII──▶ server.js (bridge) ──SSE──▶ browser dashboard
+W2K-2 WebSocket ──────────────────────────────────────────────────▶ browser dashboard
 ```
 
 Browsers cannot open raw TCP/UDP sockets, so `server.js` is a small bridge that
@@ -32,7 +33,9 @@ node build.js
 ```
 
 creates `dist/Cassini-<platform>/` and a `.zip` of it: a private copy of the Node.js runtime, the
-dashboard and a double-click launcher. The person using it needs nothing installed. Build on the platform
+dashboard and two double-click launchers, "Start Cassini" (this computer only) and "Start Cassini (share on
+network)". The person using it needs nothing installed. Your own `config.json`, `prefs.json` and
+`history.json` are never copied into the download. Build on the platform
 you are targeting (the runtime copied is the one running the build).
 
 ```
@@ -44,14 +47,17 @@ embedded in the Node.js runtime (Node's "single executable application" feature)
 the bridge and opens the browser; settings are saved next to the exe. On Windows the exe is given the Cassini icon and name
 from `icon/cassini.ico` if the `rcedit` tool is present at `tools/rcedit/rcedit-x64.exe` (download it from
 https://github.com/electron/rcedit/releases; it is not stored in the repository). `node icon/make-icon.js` regenerates the icon. This step fetches the `postject` tool
-from npm the first time. Options: `--no-open`, `--lan`, `--port <n>`, `--demo`. The exe is not code-signed,
+from npm the first time. Options: `--no-open`, `--lan`, `--port <n>`, `--demo`. If `Cassini.exe` is running
+and cannot be replaced, build under another name with `node build.js --exe --exe-name Cassini-new.exe`.
+Give the exe its own folder: `config.json`, `prefs.json`, `history.json` and `tile-cache/` are created
+next to it. The exe is not code-signed,
 so Windows SmartScreen will warn on first run until it is signed with a code-signing certificate.
 
 ## Three ways to get data
 
 | Source | How | Needs the bridge? |
 |---|---|---|
-| **WebSocket** | The browser connects straight to the gateway's built-in WebSocket (`ws://<gateway>/api/websocket`). No data server setup on the gateway. Chosen per device. | No - `public/index.html` can even be opened straight from disk |
+| **WebSocket** | The browser connects straight to the gateway's built-in WebSocket (`ws://<gateway>/api/websocket`). No data server setup on the gateway. Chosen per device. | No - `public/index.html` can even be opened straight from disk (the OpenStreetMap map is not available then, see Map tiles) |
 | **TCP** / **UDP** | The bridge connects to a W2K-2 data server set to N2K ASCII and relays it to every browser. | Yes |
 | **Demo data** | Built-in simulator. | Yes |
 
@@ -75,20 +81,24 @@ reconnects automatically.
 | Page | Contents |
 |---|---|
 | Overview | Compass, SOG, depth + history, wind, position, alerts, engines, batteries, tanks, environment |
-| My Dashboard | Your own layout: add any panels (instruments, chart, single values, gauges, history graphs, lists), drag to move, drag the corner to resize; saved in the browser |
+| My Dashboard | Your own layout: add any panels (instruments, chart, single values, gauges, history graphs, lists), drag to move, drag the corner to resize; shared by every device viewing the dashboard |
 | Navigation | AIS targets (list with range, bearing, CPA and time to CPA, and markers on the chart), heading/COG/ROT, own-ship track plot, GNSS quality, waypoint (DTW, BTW, XTE, VMG, ETA), roll/pitch/rudder, depth & speed history |
 | Engines | Per engine: RPM, coolant, oil pressure, load, fuel rate, alternator, boost, gearbox, hours, warning flags |
 | Power & Tanks | Per battery: voltage, current, power, SOC, temperature, time remaining; tank levels; switch bank status |
 | Environment | Apparent & true wind (true is calculated if not on the network), barometer + trend, temperatures, humidity |
 | Alarms | Active alarms; enable/disable each alarm, set its trigger threshold and severity; optional sound on new critical alarms |
 | Sources | Choose which source address to prioritise when several devices send the same data (automatic fail-over if it stops); custom names for engines, batteries and tanks |
-| Network | Gateway status (W2K-2 REST API), devices on the bus, PGN traffic table, raw N2K ASCII log, and the gateway's EBL log files on its SD card (list and download) |
+| Network | Gateway status (W2K-2 REST API), devices on the bus, PGN traffic table, raw N2K ASCII log, and Gateway logs (see below) |
 
 - **Themes:** light, dark and a red-only **night** mode, plus a brightness control (per device).
 - **Alarm bar:** an active alarm shows on every page until acknowledged; critical alarms flash and can beep.
 - **Stale data:** a value dims when its data is overdue, then goes blank ("—") when it stops.
-- **Shared settings:** units, alarms, source priority and the My Dashboard layout are saved by the bridge
-  in `prefs.json`, so every device viewing the dashboard shares them. Export/import is in Settings.
+- **Shared settings:** units, alarms, source priority, custom names and the My Dashboard layout are saved by
+  the bridge in `prefs.json`, so every device viewing the dashboard shares them. Export/import is in Settings.
+  Theme, brightness, sound, the Map / Offline plot choice and the WebSocket source stay on each device.
+- **Clear all data:** Settings > Received data forgets everything received so far (values, engine, battery and
+  tank instances, sources, AIS targets, the track and the stored history) on every connected device. Use it
+  before testing a new data stream. Settings, alarms and custom names are kept.
 - **Stored history:** the bridge decodes the stream itself and keeps depth, speed, wind, pressure,
   temperatures, battery, engine and tank values plus the vessel position in `history.json`: a sample
   every 30 s for 24 hours and 10-minute averages for 30 days. Charts have Live / 24 h / 7 d / 30 d
@@ -98,6 +108,14 @@ reconnects automatically.
 - **Map tiles:** the bridge fetches each map tile once and keeps it in `tile-cache/`, so areas you have
   already viewed keep working with no internet. Only viewed tiles are stored. Settings > Map tiles accepts another
   provider's tile address and credit if you do not want to use OpenStreetMap. The cache folder is safe to delete.
+  When `public/index.html` is opened straight from disk there is no bridge, and the OpenStreetMap servers
+  refuse tile requests from such a page, so the chart explains this instead (a custom tile provider still works
+  if it allows it); the offline plot works either way.
+- **Gateway logs:** the Network page lists the EBL log folders and files the W2K-2 writes to its SD card, marks
+  the file being written, and downloads one file at a time (the gateway serves them at roughly 200 kB/s, so a
+  5 MB file takes about half a minute). The files are in Actisense EBL format: open them with Actisense EBL
+  Reader or Toolkit. Downloads use the gateway's `/api/download` request, which is not in the published
+  REST API document.
 - **AIS:** PGNs 129038, 129039, 129794, 129809 and 129810 are decoded from the public PGN definitions and have
   only been checked against the built-in simulator, not a real AIS receiver.
 - **Test connection:** Settings can test a TCP/UDP source and says plainly what is wrong.
@@ -113,9 +131,12 @@ add a decoder to `DECODERS` in `public/n2k.js`.
 ## Notes
 
 - **Receive only.** The dashboard never transmits onto the NMEA 2000 bus and only
-  makes read-only `GET` requests to the gateway's REST API (`about`, `info`,
-  `wifi`, `installation`, `data_server_config`, `data_logs`, `paths`) and, when you click a download,
-  fetches that one log file. It never logs in to the gateway and never changes or deletes anything on it.
+  makes read-only `GET` requests to the gateway's REST API (`about`, `info`, `wifi`, `installation`,
+  `data_server_config`, `data_routing`, `data_logs`, `paths`) and, when you click a download, fetches that
+  one log file. It never logs in to the gateway and never changes or deletes anything on it.
+- **Network sharing has no password.** With `--lan` (or the "share on network" launcher) anyone on the same
+  network who opens the dashboard can change the shared settings, use Clear all data and download the
+  gateway's log files. Only use it on a network you trust.
 - **Branding.** The logo is `public/cassini_logo_bold.svg`; it is recoloured automatically for the dark theme.
   The theme uses the logo purple (`#3b0a91`) for buttons, switches and the active page, blue for data, and
   green / amber / red for status. The colours are CSS variables in the "theme colours" block at the top of
@@ -123,17 +144,17 @@ add a decoder to `DECODERS` in `public/n2k.js`.
 - **Map.** The Navigation chart uses [Leaflet](https://leafletjs.com) 1.9.4 (BSD-2-Clause, bundled in
   `public/vendor/`) with [OpenStreetMap](https://www.openstreetmap.org/copyright) base tiles and the
   [OpenSeaMap](https://www.openseamap.org) seamark overlay. Both are free; the attribution shown on the map
-  must stay visible. Tiles are fetched from the internet by the browser - with no connection the chart
-  switches to the built-in offline plot. The public OSM tile servers are donation-funded and have a
-  [usage policy](https://operations.osmfoundation.org/policies/tiles/) (no bulk downloading, no guaranteed
-  availability); if this is distributed widely, point the tile URL in `public/js/chart.js` at your own or a
-  commercial tile service.
+  must stay visible. Tiles are fetched from the internet by the bridge (and cached, see Map tiles) - with no
+  connection the chart switches to the built-in offline plot. The public OSM tile servers are donation-funded
+  and have a [usage policy](https://operations.osmfoundation.org/policies/tiles/) (no bulk downloading, no
+  guaranteed availability); if this is distributed widely, use your own or a commercial tile service, either in
+  Settings > Map tiles or by changing `TILE_SOURCES` in `server.js`.
 - **Offline use.** Everything else is served locally, including the Roboto font (bundled in `public/vendor/fonts/`).
 - Not a substitute for certified navigation instruments.
 
 ## How the code is organised
 
-- `server.js` – bridge: static files, TCP/UDP client, SSE stream, REST proxy
+- `server.js` – bridge: static files, TCP/UDP client, SSE stream, gateway REST and log-file proxy, map tile cache
 - `sim.js` – demo simulator (N2K ASCII generator)
 - `history.js` – stored history for the 24 h / 7 d / 30 d charts and the track
 - `public/n2k.js` – N2K ASCII parser and PGN decoders (shared by the bridge and the browser)
