@@ -68,7 +68,10 @@ let pushTimer = 0;
 const saveLocal = () => { try { localStorage.setItem('w2k.settings', JSON.stringify(settings)); } catch { /* private mode */ } };
 const pushShared = () => fetch('/api/prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Client': clientId }, body: JSON.stringify(sharedSettings()) }).catch(() => {});
 if (settings.shallow != null) { if (!settings.alarms.shallow) settings.alarms.shallow = { value: settings.shallow }; delete settings.shallow; }   // migrate old setting
-const saveSettings = () => { saveLocal(); clearTimeout(pushTimer); pushTimer = setTimeout(pushShared, 400); };
+// Only push when a shared setting really changed. Otherwise two open dashboards can echo each other's settings for ever,
+// each push making the other rebuild its pages.
+let lastShared = null;
+const saveSettings = () => { saveLocal(); clearTimeout(pushTimer); pushTimer = setTimeout(() => { const now = JSON.stringify(sharedSettings()); if (now === lastShared) return; lastShared = now; pushShared(); }, 400); };
 /** replace the shared part of the settings (from the bridge, another device, or an imported file) */
 function applyShared(p) {
   if (!p || typeof p !== 'object') return;
@@ -80,6 +83,7 @@ function applyShared(p) {
   if (typeof settings.sources !== 'object' || !settings.sources) settings.sources = {};
   if (typeof settings.names !== 'object' || !settings.names) settings.names = {};
   if (typeof settings.tiles !== 'object' || !settings.tiles) settings.tiles = {};
+  lastShared = JSON.stringify(sharedSettings());
   saveLocal(); alertAt = 0; buildPages();
 }
 const UNITS = {

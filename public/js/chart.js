@@ -53,7 +53,7 @@ function chartView() {
   const centre = h('button', { type: 'button', class: 'btn sm', text: 'Centre on vessel', hidden: '', onclick: () => { follow = true; centre.hidden = true; last = 0; } });
   let map = null, aisLayer, aisMarks = new Map(), ship, line, wpt, wptLine, follow = true, fixed = false, lastW = 0, last = 0, loaded = 0, errors = 0;
   function setView(v) {
-    settings.navView = v; saveSettings();
+    settings.navView = v; saveLocal();   // a per-device choice: never pushed to the bridge (this also runs every time the chart is built)
     mapEl.hidden = v !== 'map'; plot.hidden = v !== 'plot'; if (v !== 'map') centre.hidden = true; else note.hidden = true;
     bMap.setAttribute('aria-pressed', v === 'map'); bPlot.setAttribute('aria-pressed', v === 'plot');
     lastW = 0; last = 0;
