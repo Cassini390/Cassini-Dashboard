@@ -43,12 +43,12 @@ const DEMO = args.includes('--demo');   // always start on the simulator and nev
 if (!DEMO) { try { Object.assign(config, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))); } catch { /* first run */ } }
 
 function validateConfig(c) {
-  const mode = ['sim', 'tcp', 'udp'].includes(c.mode) ? c.mode : null;
+  const mode = ['sim', 'tcp', 'udp', 'ws'].includes(c.mode) ? c.mode : null;
   const port = parseInt(c.port, 10);
   const host = String(c.host || '').trim();
-  if (!mode) return 'mode must be sim, tcp or udp';
-  if (mode !== 'sim' && !(port > 0 && port < 65536)) return 'port must be 1-65535';
-  if (mode === 'tcp' && !HOST_RE.test(host)) return 'a valid host name or IP address is required for TCP';
+  if (!mode) return 'mode must be sim, tcp, udp or ws';
+  if ((mode === 'tcp' || mode === 'udp') && !(port > 0 && port < 65536)) return 'port must be 1-65535';
+  if ((mode === 'tcp' || mode === 'ws') && !HOST_RE.test(host)) return `a valid host name or IP address is required for ${mode === 'ws' ? 'WebSocket' : 'TCP'}`;
   if (host && !HOST_RE.test(host)) return 'invalid host';
   return { mode, host, port: port || config.port };
 }
@@ -87,10 +87,11 @@ let stopSource = () => {};
 
 function startSource() {
   stopSource();
-  history.setSource(config.mode === 'sim' ? 'sim' : `${config.mode}|${config.host}|${config.port}`);   // new source = new history
+  history.setSource(config.mode === 'sim' ? 'sim' : config.mode === 'ws' ? `ws|${config.host}` : `${config.mode}|${config.host}|${config.port}`);   // new source = new history
   pending = [];
   if (config.mode === 'tcp') stopSource = startTcp();
   else if (config.mode === 'udp') stopSource = startUdp();
+  else if (config.mode === 'ws') stopSource = startWs();
   else stopSource = startSim();
 }
 
@@ -126,6 +127,31 @@ function startTcp() {
   return () => { stopped = true; clearTimeout(timer); if (sock) sock.destroy(); };
 }
 
+// The gateway's built-in WebSocket (ws://<gateway>/api/websocket): no data server needs setting up on the gateway.
+// Uses the WebSocket client built into Node.js (22 and later).
+const WS_INIT = JSON.stringify({ t: 'ws_init', c: { subscriptions: [{ name: 'data', enabled: 'true' }] } });
+function wsLines(data) {   // {"t":"data","c":{"m":[lines]}} -> lines
+  let m; try { m = JSON.parse(String(data)); } catch { return []; }
+  return m && m.t === 'data' && m.c && Array.isArray(m.c.m) ? m.c.m : [];
+}
+function startWs() {
+  let sock = null, timer = null, idle = null, stopped = false;
+  if (typeof WebSocket !== 'function') { setStatus('error', 'This version of Node.js has no WebSocket support (Node.js 22 or later is needed)'); return () => {}; }
+  const connect = () => {
+    if (stopped) return;
+    setStatus('connecting', `WebSocket ${config.host}`);
+    try { sock = new WebSocket(`ws://${config.host}/api/websocket`); } catch (e) { setStatus('error', e.message); return; }
+    const s = sock;
+    const watch = () => { clearTimeout(idle); idle = setTimeout(() => { setStatus('error', 'No data for 15 s - reconnecting'); try { s.close(); } catch { /* closed */ } }, 15000); };
+    s.onopen = () => { setStatus('connected', `WebSocket ${config.host}`); s.send(WS_INIT); watch(); };
+    s.onmessage = (e) => { watch(); for (const l of wsLines(e.data)) onLine(l); };
+    s.onerror = () => { if (status.state !== 'connected') setStatus('error', `Could not open a WebSocket to ${config.host}`); };
+    s.onclose = () => { clearTimeout(idle); if (sock === s && !stopped) timer = setTimeout(connect, 3000); };
+  };
+  connect();
+  return () => { stopped = true; clearTimeout(timer); clearTimeout(idle); if (sock) try { sock.close(); } catch { /* closed */ } };
+}
+
 function startUdp() {
   const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
   let announced = false;
@@ -143,7 +169,21 @@ function startUdp() {
 
 // ---------------------------------------------------------------- connection test (Settings > Test connection)
 const N2K_LINE = /^A\d{6}\.\d{3} [0-9A-F]{5} [0-9A-F]{5} (?:[0-9A-F]{2})*$/i;
+function testWs(c) {
+  return new Promise((resolve) => {
+    let sock, open = false, done = false;
+    const fin = (ok, message) => { if (done) return; done = true; clearTimeout(timer); try { sock.close(); } catch { /* closed */ } resolve({ ok, message }); };
+    const timer = setTimeout(() => fin(false, open ? `Connected to ${c.host}, but no NMEA 2000 data arrived within 4 seconds. Check the NMEA 2000 network is powered.`
+      : `No answer from ${c.host} within 4 seconds. Check the address, and that this computer is on the same network as the gateway.`), 4000);
+    if (typeof WebSocket !== 'function') return fin(false, 'This version of Node.js has no WebSocket support (Node.js 22 or later is needed).');
+    try { sock = new WebSocket(`ws://${c.host}/api/websocket`); } catch { return fin(false, 'That address is not valid.'); }
+    sock.onopen = () => { open = true; sock.send(WS_INIT); };
+    sock.onmessage = (e) => { const l = wsLines(e.data)[0]; if (l && N2K_LINE.test(String(l).trim())) fin(true, `Success - receiving NMEA 2000 data from ${c.host} over WebSocket.`); };
+    sock.onerror = () => { if (!open) fin(false, `Could not open a WebSocket to ${c.host}. Check the address, and that this computer is on the same network as the gateway.`); };
+  });
+}
 function testConnection(c) {
+  if (c.mode === 'ws') return testWs(c);
   return new Promise((resolve) => {
     let done = false, connected = false, sock = null, buf = '';
     const where = c.mode === 'tcp' ? `${c.host}:${c.port}` : `UDP port ${c.port}`;

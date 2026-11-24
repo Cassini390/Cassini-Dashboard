@@ -104,9 +104,14 @@ function windDial() {
 }
 
 /** history chart for a store key. "Live" = the last 30 min held in this page; 24 h / 7 d / 30 d come from the bridge's stored history.
- *  o.thr() may return alarm thresholds [{ v, lvl, label }] to draw as dashed lines (o.fit forces them into view). */
+ *  The time axis always spans the whole period chosen (ending now), so a chart with little data only fills part of it.
+ *  Options: o.thr() alarm thresholds [{ v, lvl, label }] drawn as dashed lines (o.fit forces them into view); o.zero starts the
+ *  scale at 0; o.max fixes the top (e.g. 100 for %); o.invert draws larger values lower (depth); o.unit for the hover readout. */
 const RANGES = [['live', 'Live'], ['24h', '24 h'], ['7d', '7 d'], ['30d', '30 d']];
+const RANGE_MS = { live: 30 * 60000, '24h': 24 * 3600000, '7d': 7 * 24 * 3600000, '30d': 30 * 24 * 3600000 };
+const RANGE_GAP = { live: 60000, '24h': 5 * 60000, '7d': 40 * 60000, '30d': 40 * 60000 };   // longer than this without a sample: break the line
 const fmtAxisTime = (t, spanMs) => (spanMs > 36 * 3600000 ? new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' }) : new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+const fmtPointTime = (t, spanMs) => new Date(t).toLocaleString([], spanMs > 36 * 3600000 ? { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false } : { hour: '2-digit', minute: '2-digit', second: spanMs <= RANGE_MS.live ? '2-digit' : undefined, hour12: false });
 function rangeChips(onPick) {
   const el = h('div', 'ranges');
   const pick = (r) => { for (const b of el.children) b.setAttribute('aria-pressed', b.dataset.r === r); onPick(r); };
@@ -118,37 +123,65 @@ function rangeChips(onPick) {
 function spark(key, show = (v) => v, digits = 1, o = {}) {
   const line = s('path', 'line'), area = s('path', 'area'), thrG = s('g'), hi = h('span', 'hi'), lo = h('span', 'lo'), msg = h('span', 'span'), thrL = h('div', 'thr-labels');
   const t0l = h('span', 'axis-t'), t1l = h('span', 'axis-t');
-  let range = 'live', hist = null, fetchedAt = 0, sig = '';
+  const cursor = h('div', { class: 'spark-cursor', hidden: '' }), dot = h('div', { class: 'spark-dot', hidden: '' }), tip = h('div', { class: 'spark-tip', hidden: '', role: 'status' });
+  const svg = s('svg', { viewBox: '0 0 300 80', preserveAspectRatio: 'none' }, area, thrG, line);
+  let range = 'live', hist = null, fetchedAt = 0, sig = '', view = null, hoverX = null;
   const chips = rangeChips((r) => { range = r; hist = null; fetchedAt = 0; sig = ''; });
-  const el = h('div', 'spark', h('div', 'spark-plot', s('svg', { viewBox: '0 0 300 80', preserveAspectRatio: 'none' }, area, thrG, line), thrL, hi, lo, msg), h('div', 'spark-axis', t0l, chips, t1l));
+  const plot = h('div', 'spark-plot', svg, thrL, hi, lo, msg, cursor, dot, tip);
+  const el = h('div', 'spark', plot, h('div', 'spark-axis', t0l, chips, t1l));
+  const unitTxt = () => { const u = typeof o.unit === 'function' ? o.unit() : o.unit; return u ? ' ' + u : ''; };
+  // hover (mouse) or tap / drag (touch): show the reading nearest that time
+  const readout = () => {
+    if (hoverX == null || !view || !view.a.length) { cursor.hidden = dot.hidden = tip.hidden = true; return; }
+    const W = svg.clientWidth || 1, frac = clamp(hoverX / W, 0, 1), t = view.t0 + frac * (view.t1 - view.t0);
+    let best = null, bd = Infinity;
+    for (const p of view.a) { const d = Math.abs(p.t - t); if (d < bd) { bd = d; best = p; } }
+    if (!best || bd > (view.t1 - view.t0) / 20) { cursor.hidden = dot.hidden = tip.hidden = true; return; }   // nothing recorded near there
+    const x = ((best.t - view.t0) / (view.t1 - view.t0)) * W, yPct = (view.y(best.v) / 80) * 100;
+    cursor.style.left = dot.style.left = `${x}px`; dot.style.top = `${yPct}%`;
+    tip.textContent = `${fmtPointTime(best.t, view.t1 - view.t0)} · ${f(show(best.v), digits)}${unitTxt()}`;
+    tip.style.left = `${x}px`; tip.classList.toggle('flip', x > W * 0.6);
+    cursor.hidden = dot.hidden = tip.hidden = false;
+  };
+  plot.addEventListener('pointermove', (e) => { hoverX = e.clientX - svg.getBoundingClientRect().left; readout(); });
+  plot.addEventListener('pointerdown', (e) => { hoverX = e.clientX - svg.getBoundingClientRect().left; readout(); });
+  plot.addEventListener('pointerleave', () => { hoverX = null; readout(); });
   reg(() => {
     if (range !== 'live' && (Date.now() - fetchedAt > 60000 || fetchedAt < wipedAt)) {
       fetchedAt = Date.now(); const r = range;
       fetch(`/api/history?key=${encodeURIComponent(key)}&range=${r}`).then((x) => x.json()).then((j) => { if (range === r) { hist = (j.points || []).map(([t, v]) => ({ t, v })); sig = ''; } }).catch(() => { if (range === r) { hist = []; sig = ''; } });
     }
     const a = range === 'live' ? (H[key] || []) : hist, ths = (o.thr ? o.thr() : []).filter((x) => x && x.v != null);
-    const sg = `${range}|${a ? a.length : -1}|${a && a.length ? a[a.length - 1].t : 0}|${ths.map((x) => x.v).join()}`;
+    const now = Date.now(), t1 = now, t0 = now - RANGE_MS[range], minute = Math.floor(now / 60000);
+    const sg = `${range}|${a ? a.length : -1}|${a && a.length ? a[a.length - 1].t : 0}|${ths.map((x) => x.v).join()}|${range === 'live' ? Math.floor(now / 5000) : minute}`;
     if (sg === sig) return; sig = sg;
-    const blank = (text) => { line.setAttribute('d', ''); area.setAttribute('d', ''); thrG.replaceChildren(); thrL.replaceChildren(); hi.textContent = lo.textContent = t0l.textContent = t1l.textContent = ''; msg.textContent = text; };
+    t0l.textContent = fmtAxisTime(t0, t1 - t0); t1l.textContent = 'now';
+    const blank = (text) => { view = null; readout(); line.setAttribute('d', ''); area.setAttribute('d', ''); thrG.replaceChildren(); thrL.replaceChildren(); hi.textContent = lo.textContent = ''; msg.textContent = text; };
     if (!a) return blank('Loading…');
-    if (a.length < 2) return blank(range === 'live' ? 'Collecting history…' : 'No stored history for this period yet');
+    const pts0 = a.filter((p) => p.t >= t0);
+    if (pts0.length < 2) return blank(range === 'live' ? 'Collecting history…' : 'No stored history for this period yet');
     msg.textContent = '';
     let mn = Infinity, mx = -Infinity;
-    for (const p of a) { if (p.v < mn) mn = p.v; if (p.v > mx) mx = p.v; }
+    for (const p of pts0) { if (p.v < mn) mn = p.v; if (p.v > mx) mx = p.v; }
     const dMin = mn, dMax = mx, reach = Math.max(mx - mn, (o.minSpan || 0.05) * 4);
     for (const x of ths) if (o.fit || (x.v > mn - reach && x.v < mx + reach)) { mn = Math.min(mn, x.v); mx = Math.max(mx, x.v); }
     const pad = Math.max((mx - mn) * 0.12, o.minSpan || 0.05); mn -= pad; mx += pad;
     if (o.zero) mn = Math.min(0, mn + pad);
-    const t0 = a[0].t, t1 = a[a.length - 1].t, dt = Math.max(t1 - t0, 1);
+    if (o.max != null) { mn = Math.min(0, mn); mx = o.max; }
+    const X = (t) => ((t - t0) / (t1 - t0)) * 300;
     const y = (v) => (o.invert ? (v - mn) / (mx - mn) : 1 - (v - mn) / (mx - mn)) * 80;
-    const pts = a.map((p) => `${(((p.t - t0) / dt) * 300).toFixed(1)} ${y(p.v).toFixed(1)}`);
-    line.setAttribute('d', 'M' + pts.join('L'));
-    area.setAttribute('d', `M0 ${o.invert ? 0 : 80}L${pts.join('L')}L300 ${o.invert ? 0 : 80}Z`);
+    // split into runs where samples are missing (Cassini not running, or no data), so the line does not bridge the gap
+    const runs = []; let run = [];
+    pts0.forEach((p, i) => { if (i && p.t - pts0[i - 1].t > RANGE_GAP[range]) { runs.push(run); run = []; } run.push(p); });
+    runs.push(run);
+    const base = o.invert ? 0 : 80;
+    line.setAttribute('d', runs.map((r) => 'M' + r.map((p) => `${X(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`).join('L')).join(''));
+    area.setAttribute('d', runs.filter((r) => r.length > 1).map((r) => `M${X(r[0].t).toFixed(1)} ${base}L${r.map((p) => `${X(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`).join('L')}L${X(r[r.length - 1].t).toFixed(1)} ${base}Z`).join(''));
     const shown = ths.filter((x) => x.v >= mn && x.v <= mx);
     thrG.replaceChildren(...shown.map((x) => s('path', { class: `thr-line s-${x.lvl}`, d: `M0 ${y(x.v).toFixed(1)}H300` })));
     thrL.replaceChildren(...shown.map((x) => h('span', { class: `thr-label ${x.lvl}`, style: `top:${(y(x.v) / 80 * 100).toFixed(1)}%`, text: `${x.label} ${f(show(x.v), digits)}` })));
-    hi.textContent = f(show(o.invert ? dMin : dMax), digits); lo.textContent = f(show(o.invert ? dMax : o.zero ? Math.min(0, dMin) : dMin), digits);
-    t0l.textContent = fmtAxisTime(t0, dt); t1l.textContent = range === 'live' ? 'now' : fmtAxisTime(t1, dt);
+    hi.textContent = f(show(o.invert ? dMin : dMax), digits); lo.textContent = f(show(o.invert ? dMax : dMin), digits);
+    view = { a: pts0, t0, t1, y }; readout();
   });
   return el;
 }

@@ -61,7 +61,9 @@ function histSpec(key) {
   const thr = (alarm, lvl, label, mul = 1) => () => (al(alarm).on ? [{ v: al(alarm).value * mul, lvl: al(alarm).level, label }] : []);
   if (p === 'eng' && fld === 'rpm') return { label: 'RPM', show: (v) => v, digits: 0, unit: () => 'rpm', o: { zero: true, minSpan: 50, thr: thr('overRev', 'warn', 'Over-speed') } };
   if (p === 'eng' && fld === 'coolT') return { label: 'Coolant', show: cTemp, digits: 0, unit: () => unit('temp'), o: { minSpan: 1, thr: thr('coolant', 'crit', 'High') } };
-  if (p === 'tank') { const ty = +id.split('-')[0], low = [0, 1, 6].includes(ty); return { label: 'Level', show: (v) => v, digits: 0, unit: () => '%', o: { zero: true, minSpan: 1, thr: low ? thr(ty === 1 ? 'waterLow' : 'fuelLow', 'warn', 'Low') : [2, 5].includes(ty) ? thr('wasteHigh', 'warn', 'Full') : null } }; }
+  if (p === 'tank') { const ty = +id.split('-')[0], low = [0, 1, 6].includes(ty); return { label: 'Level', show: (v) => v, digits: 0, unit: () => '%', o: { max: 100, minSpan: 1, thr: low ? thr(ty === 1 ? 'waterLow' : 'fuelLow', 'warn', 'Low') : [2, 5].includes(ty) ? thr('wasteHigh', 'warn', 'Full') : null } }; }
+  if (p === 'bat' && fld === 'a') return { label: 'Current', show: (v) => v, digits: 1, unit: () => 'A', o: { minSpan: 0.5 } };
+  if (p === 'bat' && fld === 'soc') return { label: 'State of charge', show: (v) => v, digits: 0, unit: () => '%', o: { max: 100, minSpan: 1, thr: thr('socLow', 'warn', 'Low') } };
   if (p === 'bat') return { label: 'Voltage', show: (v) => v, digits: 2, unit: () => 'V', o: { minSpan: 0.05, fit: true, thr: thrBat(id) } };
   return { label: key, show: (v) => v, digits: 1, unit: () => '', o: {} };
 }
@@ -69,8 +71,10 @@ const histTitle = (key) => { const [p, id] = key.split('.'), sp = histSpec(key);
 /** a labelled history chart for a stored key */
 function chartBox(key, labelled = true) {
   const sp = histSpec(key);
-  return h('div', 'chart-box', labelled ? h('div', 'label', sp.label, ' ', t(null, () => fu(sp.show(get(key)), sp.digits, sp.unit()))) : null, spark(key, sp.show, sp.digits, sp.o));
+  return h('div', 'chart-box', labelled ? h('div', 'label', sp.label, ' ', t(null, () => fu(sp.show(get(key)), sp.digits, sp.unit()))) : null, spark(key, sp.show, sp.digits, { ...sp.o, unit: sp.unit }));
 }
+/** shows el only while there is something for key: a live value or recorded history (e.g. a battery monitor that reports current) */
+function optional(key, el) { el.hidden = true; reg(() => { const on = get(key) != null || !!(H[key] && H[key].length); if (el.hidden === on) el.hidden = !on; }); return el; }
 /** custom names for engines, batteries and tanks (shared setting) */
 function namesCard() {
   const body = h('div', 'names'); let sig = null;

@@ -247,6 +247,13 @@ svg text { font-family: var(--font-body); fill: var(--text); }
 .spark-plot .thr-labels { right: 52px; }
 .thr-label { position: absolute; left: 4px; transform: translateY(-110%); font-size: 12px; font-weight: 700; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--card) 85%, transparent); white-space: nowrap; }
 .thr-label.crit { color: var(--crit); } .thr-label.warn { color: var(--warn); }
+/* hover / tap readout: a line at the nearest reading, a dot on the graph and the time and value */
+.spark-plot { touch-action: pan-y; cursor: crosshair; }
+.spark-cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-3); pointer-events: none; }
+.spark-dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--data); border: 2px solid var(--card); pointer-events: none; }
+.spark-tip { position: absolute; top: 2px; transform: translateX(8px); padding: 3px 8px; border-radius: 6px; background: var(--card); border: 1px solid var(--line);
+  box-shadow: var(--shadow); font-size: 13px; font-weight: 500; white-space: nowrap; pointer-events: none; z-index: 2; font-variant-numeric: tabular-nums; }
+.spark-tip.flip { transform: translateX(calc(-100% - 8px)); }
 /* groups of labelled charts (engine and tank history) */
 .charts2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
 .charts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
@@ -355,7 +362,11 @@ input.sw:checked::after { left: 26px; }
 /* ================================================================== My Dashboard: panel grid, panel contents, edit mode */
 .dash-bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: 30px; }
 .dash-bar .hint { margin-right: auto; }
-.dash { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 84px; grid-auto-flow: dense; gap: 16px; }
+.dash { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); grid-auto-rows: 42px; grid-auto-flow: dense; gap: 16px; }
+/* rename dialog (My Dashboard) */
+dialog#renamePanel { width: min(480px, calc(100vw - 24px)); }
+.stack-label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text-2); }
+.stack-label input { width: 100%; }
 .dash-empty { grid-column: 1 / -1; padding: 30px 0; text-align: center; }
 .panel { position: relative; padding: 12px 14px 14px; gap: 8px; overflow: hidden; }
 .panel > h3 { align-items: center; min-height: 20px; flex: none; }

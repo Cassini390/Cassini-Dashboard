@@ -105,7 +105,7 @@ setInterval(() => {
   const sample = (k, v) => { if (v == null) return; const a = (H[k] = H[k] || []); a.push({ t: now, v }); if (a.length > 900) a.shift(); };
   for (const [mmsi, tg] of aisTargets) if (!tg.t || now - tg.t > 600000) aisTargets.delete(mmsi);   // drop AIS targets not heard for 10 min
   sample('depth', get('depth')); sample('sog', get('sog')); sample('pressure', get('pressure')); sample('tws', tw.tws);
-  for (const id of ids('bat')) sample(`bat.${id}.v`, get(`bat.${id}.v`));
+  for (const id of ids('bat')) for (const fld of ['v', 'a', 'soc']) sample(`bat.${id}.${fld}`, get(`bat.${id}.${fld}`));
   for (const id of ids('eng')) { sample(`eng.${id}.rpm`, get(`eng.${id}.rpm`)); sample(`eng.${id}.coolT`, get(`eng.${id}.coolT`)); }
   for (const id of ids('tank')) sample(`tank.${id}.level`, get(`tank.${id}.level`));
   const sog = get('sog'); if (sog != null) maxSog = Math.max(maxSog * 0.9995, sog);

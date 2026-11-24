@@ -38,7 +38,8 @@ const HISTORY = { depth: ['Depth history', 'depth', (v) => conv('depth', v), () 
   tws: ['True wind history', 'tws', (v) => conv('speed', v), () => unit('speed'), { zero: true, minSpan: 0.5, thr: thrWind }, () => trueWind().tws],
   baro: ['Barometer history', 'pressure', (v) => v, () => 'hPa', { minSpan: 0.3 }, () => get('pressure')] };
 const fill = (el) => { el.classList.add('fill'); return el; };
-// Panel types: name(arg), default size in grid cells (12 columns wide, ~84 px rows), build(arg). list:true = scrolling list content.
+// Panel types: name(arg), default size in "coarse" cells (12 columns wide, ~84 px rows; doubled when a panel is created, because the
+// grid itself is 24 columns of ~42 px rows so panels can be sized in half steps), build(arg). list:true = scrolling list content.
 const PANELS = {
   compass: { name: () => 'Compass', w: 3, h: 4, build: () => compass() },
   wind: { name: () => 'Wind', w: 3, h: 4, build: () => fill(windDial()) },
@@ -65,8 +66,8 @@ const PANELS = {
     reg(() => { const l = Math.max(4, m[1]().length + m[2]().length * 0.4); if (l !== len) { len = l; el.style.setProperty('--len', l.toFixed(1)); } });   // long values shrink to fit the panel
     return el;
   } },
-  history: { name: (a) => (HISTORY[a] || ['History'])[0], w: 4, h: 3, build: (a) => { const d = HISTORY[a]; return d ? [big(() => f(d[2](d[5]()), 1), d[3], 'md'), spark(d[1], d[2], 1, d[4])] : h('div', { class: 'empty', text: 'Unknown history' }); } },
-  khist: { name: (a) => histTitle(a), w: 4, h: 3, build: (a) => { const sp = histSpec(a); return [big(() => f(sp.show(get(a)), sp.digits), sp.unit, 'md'), spark(a, sp.show, sp.digits, sp.o)]; } },
+  history: { name: (a) => (HISTORY[a] || ['History'])[0], w: 4, h: 3, build: (a) => { const d = HISTORY[a]; return d ? [big(() => f(d[2](d[5]()), 1), d[3], 'md'), spark(d[1], d[2], 1, { ...d[4], unit: d[3] })] : h('div', { class: 'empty', text: 'Unknown history' }); } },
+  khist: { name: (a) => histTitle(a), w: 4, h: 3, build: (a) => { const sp = histSpec(a); return [big(() => f(sp.show(get(a)), sp.digits), sp.unit, 'md'), spark(a, sp.show, sp.digits, { ...sp.o, unit: sp.unit })]; } },
   engRpm: { name: (a) => `RPM · ${engName(a, ids('eng'))}`, w: 3, h: 3, build: (a) => rpmGauge(a) },
   engCool: { name: (a) => `Coolant · ${engName(a, ids('eng'))}`, w: 3, h: 3, build: (a) => coolGauge(a) },
   engOil: { name: (a) => `Oil pressure · ${engName(a, ids('eng'))}`, w: 3, h: 3, build: (a) => oilGauge(a) },
@@ -78,22 +79,56 @@ const PANELS = {
   } },
 };
 const DEFAULT_PANELS = [['compass'], ['map'], ['wind'], ['value', 'sog'], ['value', 'depth'], ['value', 'tws'], ['value', 'cog'], ['engines'], ['tanks'], ['alarms']];
-const newPanel = (type, arg) => ({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), type, arg, w: PANELS[type].w, h: PANELS[type].h });
+const newPanel = (type, arg) => ({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), type, arg, w: PANELS[type].w * 2, h: PANELS[type].h * 2 });
+const COLS = 24, MIN_W = 4, MIN_H = 2, MAX_H = 20;
+/** the engine, battery or tank a panel shows, if any: { key: 'bat.0', what: 'battery', def: 'Battery 1' } */
+function panelSubject(p) {
+  const k = p.type === 'khist' ? String(p.arg).split('.').slice(0, 2).join('.') : { engRpm: 'eng', engCool: 'eng', engOil: 'eng', batV: 'bat', tank: 'tank' }[p.type] ? `${{ engRpm: 'eng', engCool: 'eng', engOil: 'eng', batV: 'bat', tank: 'tank' }[p.type]}.${p.arg}` : null;
+  if (!k) return null;
+  const [kind, id] = k.split('.');
+  if (kind === 'eng') return { key: k, what: 'engine', def: defEngName(id, ids('eng')) };
+  if (kind === 'bat') return { key: k, what: 'battery', def: defBatName(id) };
+  if (kind === 'tank') return { key: k, what: 'tank', def: defTankName(id, ids('tank')) };
+  return null;
+}
+/** ✎ on a panel: its title, and for an engine, battery or tank panel also that item's name (used on every page) */
+function openRename(p, def) {
+  const subj = panelSubject(p);
+  let dlg = $('#renamePanel');
+  if (!dlg) { dlg = h('dialog', { id: 'renamePanel' }); document.body.append(dlg); applyTheme(); }
+  const nameIn = subj ? h('input', { type: 'text', maxlength: 24, value: (settings.names && settings.names[subj.key]) || '', placeholder: subj.def, 'aria-label': `Name of this ${subj.what}` }) : null;
+  const titleIn = h('input', { type: 'text', maxlength: 40, value: p.title || '', placeholder: 'Automatic', 'aria-label': 'Panel title' });
+  const form = h('form', { method: 'dialog' }, h('h2', { text: subj ? `Rename ${subj.what}` : 'Rename panel' }),
+    subj ? h('label', 'stack-label', `Name of this ${subj.what}`, nameIn, h('span', { class: 'hint', text: `Shown on every page and every device. Leave empty for "${subj.def}". The same names are on the Sources page.` })) : null,
+    h('label', 'stack-label', subj ? 'Panel title (optional)' : 'Panel title', titleIn, h('span', { class: 'hint', text: subj ? 'Only for this panel. Leave empty to use the name above.' : `Leave empty for "${def.name(p.arg)}".` })),
+    h('div', 'actions', h('button', { class: 'btn ghost', type: 'button', text: 'Cancel', onclick: () => dlg.close() }), h('button', { class: 'btn primary', type: 'submit', text: 'Save' })));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (subj) { const v = nameIn.value.trim(); if (v) settings.names[subj.key] = v.slice(0, 24); else delete settings.names[subj.key]; }
+    const tt = titleIn.value.trim(); if (tt) p.title = tt.slice(0, 40); else delete p.title;
+    saveSettings(); dlg.close(); buildPages();
+  });
+  dlg.replaceChildren(form); dlg.showModal(); (nameIn || titleIn).focus();
+}
 /** everything that can be added, grouped for the "Add panel" dialog */
 function panelCatalogue() {
   const g = { Navigation: [['compass'], ['map'], ['position'], ['sog'], ['waypoint'], ['gnss'], ['attitude'], ['ais']], Wind: [['wind']], Engines: [['engines']], Electrical: [['batteries']], Tanks: [['tanks']],
     Environment: [['temps']], System: [['alarms']], 'Single values': Object.keys(METRICS).map((k) => ['value', k]), 'History graphs': Object.keys(HISTORY).map((k) => ['history', k]) };
   g.Wind.push(...['aws', 'awa', 'tws', 'twa', 'twd'].map((k) => ['value', k]));
   for (const id of ids('eng')) g.Engines.push(['engRpm', id], ['engCool', id], ['engOil', id], ['khist', `eng.${id}.rpm`], ['khist', `eng.${id}.coolT`]);
-  for (const id of ids('bat')) g.Electrical.push(['batV', id], ['khist', `bat.${id}.v`]);
+  for (const id of ids('bat')) g.Electrical.push(['batV', id], ['khist', `bat.${id}.v`], ['khist', `bat.${id}.a`], ['khist', `bat.${id}.soc`]);
   for (const id of ids('tank')) g.Tanks.push(['tank', id], ['khist', `tank.${id}.level`]);
   g.Environment.push(...['airT', 'seaT', 'baro', 'hum'].map((k) => ['value', k]));
   return g;
 }
 let editMode = false;
-const ROW = 84, GAP = 16;
+const ROW = 42, GAP = 16;
 function customPage() {
-  if (!Array.isArray(settings.panels)) settings.panels = DEFAULT_PANELS.map(([ty, a]) => newPanel(ty, a));
+  if (!Array.isArray(settings.panels)) { settings.panels = DEFAULT_PANELS.map(([ty, a]) => newPanel(ty, a)); settings.panelGrid = 2; }
+  if (settings.panelGrid !== 2) {   // layouts saved before the finer grid: same sizes in half-steps
+    for (const p of settings.panels) { p.w = clamp((p.w || 4) * 2, MIN_W, COLS); p.h = clamp((p.h || 3) * 2, MIN_H, MAX_H); }
+    settings.panelGrid = 2; saveSettings();
+  }
   const grid = h('div', 'dash' + (editMode ? ' editing' : ''));
   const saveOrder = () => { const by = Object.fromEntries(settings.panels.map((p) => [p.id, p])); settings.panels = [...grid.children].map((c) => by[c.dataset.id]).filter(Boolean); saveSettings(); };
   for (const p of settings.panels) {
@@ -105,7 +140,7 @@ function customPage() {
     const el = h('section', { class: 'card panel', 'data-id': p.id, style: `grid-column: span ${p.w}; grid-row: span ${p.h}` },
       h('h3', null, t('p-title', () => p.title || def.name(p.arg)), built && built.controls ? built.controls : null,
         h('span', 'p-edit', move,
-          h('button', { class: 'p-btn', type: 'button', title: 'Rename panel', 'aria-label': 'Rename panel', text: '✎', onclick: () => { const v = window.prompt('Panel title (leave empty for the automatic title)', p.title || def.name(p.arg)); if (v == null) return; if (v.trim()) p.title = v.trim().slice(0, 40); else delete p.title; saveSettings(); buildPages(); } }),
+          h('button', { class: 'p-btn', type: 'button', title: panelSubject(p) ? 'Rename' : 'Rename panel', 'aria-label': panelSubject(p) ? 'Rename' : 'Rename panel', text: '✎', onclick: () => openRename(p, def) }),
           h('button', { class: 'p-btn', type: 'button', title: 'Remove panel', 'aria-label': 'Remove panel', text: '✕', onclick: () => {
             const at = settings.panels.indexOf(p); settings.panels = settings.panels.filter((x) => x.id !== p.id); saveSettings(); buildPages();
             toast(`"${p.title || def.name(p.arg)}" removed.`, 'info', 9000, h('button', { class: 'btn sm', type: 'button', text: 'Undo', onclick: () => { settings.panels.splice(Math.min(at, settings.panels.length), 0, p); saveSettings(); buildPages(); $('#toast').hidden = true; } }));
@@ -122,19 +157,21 @@ function customPage() {
         const kids = [...grid.children];
         if (kids.indexOf(el) < kids.indexOf(under)) under.after(el); else under.before(el);
       };
-      const onUp = () => { move.removeEventListener('pointermove', onMove); move.removeEventListener('pointerup', onUp); move.removeEventListener('pointercancel', onUp); el.classList.remove('dragging'); saveOrder(); };
-      move.addEventListener('pointermove', onMove); move.addEventListener('pointerup', onUp); move.addEventListener('pointercancel', onUp);
+      // listen on the window, not the handle: moving the panel in the page ends the browser's pointer capture on the handle,
+      // so the handle would never hear the release and the new order would not be saved
+      const onUp = () => { removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onUp); el.classList.remove('dragging'); saveOrder(); };
+      addEventListener('pointermove', onMove); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
     });
     // resize: drag the corner grip; snaps to the grid
     grip.addEventListener('pointerdown', (e) => {
       e.preventDefault(); grip.setPointerCapture(e.pointerId); el.classList.add('resizing');
-      const x0 = e.clientX, y0 = e.clientY, w0 = p.w, h0 = p.h, colW = (grid.clientWidth - 11 * GAP) / 12;
+      const x0 = e.clientX, y0 = e.clientY, w0 = p.w, h0 = p.h, colW = (grid.clientWidth - (COLS - 1) * GAP) / COLS;
       const onMove = (ev) => {
-        p.w = clamp(Math.round(w0 + (ev.clientX - x0) / (colW + GAP)), 2, 12); p.h = clamp(Math.round(h0 + (ev.clientY - y0) / (ROW + GAP)), 1, 10);
+        p.w = clamp(Math.round(w0 + (ev.clientX - x0) / (colW + GAP)), MIN_W, COLS); p.h = clamp(Math.round(h0 + (ev.clientY - y0) / (ROW + GAP)), MIN_H, MAX_H);
         el.style.gridColumn = `span ${p.w}`; el.style.gridRow = `span ${p.h}`;
       };
-      const onUp = () => { grip.removeEventListener('pointermove', onMove); grip.removeEventListener('pointerup', onUp); grip.removeEventListener('pointercancel', onUp); el.classList.remove('resizing'); saveSettings(); };
-      grip.addEventListener('pointermove', onMove); grip.addEventListener('pointerup', onUp); grip.addEventListener('pointercancel', onUp);
+      const onUp = () => { removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onUp); el.classList.remove('resizing'); saveSettings(); };
+      addEventListener('pointermove', onMove); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
     });
     move.addEventListener('keydown', (e) => {
       const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp', fwd = e.key === 'ArrowRight' || e.key === 'ArrowDown';
@@ -147,7 +184,7 @@ function customPage() {
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       if (!d) return;
       e.preventDefault();
-      p.w = clamp(p.w + d[0], 2, 12); p.h = clamp(p.h + d[1], 1, 10);
+      p.w = clamp(p.w + d[0], MIN_W, COLS); p.h = clamp(p.h + d[1], MIN_H, MAX_H);
       el.style.gridColumn = `span ${p.w}`; el.style.gridRow = `span ${p.h}`; saveSettings();
     });
     grid.append(el);
@@ -157,7 +194,7 @@ function customPage() {
     h('span', { class: 'hint', text: editMode ? 'Drag ⠿ to move a panel, drag its bottom-right corner to resize, ✕ to remove. The layout is shared with every device.' : '' }),
     editMode ? h('button', { class: 'btn sm', type: 'button', text: 'Reset layout', onclick: () => { delete settings.panels; saveSettings(); buildPages(); } }) : null,
     editMode ? h('button', { class: 'btn sm', type: 'button', text: '+ Add panel', onclick: openAddPanel }) : null,
-    h('button', { class: 'btn sm' + (editMode ? ' primary' : ''), type: 'button', text: editMode ? 'Done' : 'Edit layout', onclick: () => { editMode = !editMode; buildPages(); } }));
+    h('button', { class: 'btn sm' + (editMode ? ' primary' : ''), type: 'button', text: editMode ? 'Done' : 'Edit layout', onclick: () => { if (editMode && grid.querySelector('.panel')) saveOrder(); editMode = !editMode; buildPages(); } }));   // Done keeps the order as shown
   return [bar, grid];
 }
 function openAddPanel() {

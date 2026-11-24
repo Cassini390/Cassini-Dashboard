@@ -37,5 +37,17 @@ window.addEventListener('hashchange', () => { const id = location.hash.slice(1);
 applyTheme();
 buildPages();
 connect();
-if (settings.ws && settings.ws.on && settings.ws.host) startDirect(settings.ws.host);
-else if (standalone) openSettings();
+if (standalone) { if (settings.ws && settings.ws.on && settings.ws.host) startDirect(settings.ws.host); else openSettings(); }
+else if (settings.ws && settings.ws.on) migrateDirectWs();
+
+// Earlier versions let a browser connect to the gateway's WebSocket by itself, alongside whatever the Cassini program was
+// connected to - so stored history (24 h / 7 d / 30 d) could come from a different source, such as the demo data.
+// The WebSocket is now one of Cassini's own connections. Move this browser's choice across, once.
+function migrateDirectWs() {
+  const host = settings.ws.host; settings.ws.on = false; saveLocal();
+  fetch('/api/config').then((r) => r.json()).then((j) => {
+    if (j.config && j.config.mode !== 'sim') return;   // Cassini already has a real source: keep it
+    return fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'ws', host, port: 80 }) })
+      .then((r) => { if (r.ok) toast(`Cassini now connects to the gateway's WebSocket (${host}) itself, so stored history comes from the same data.`, 'info', 12000); });
+  }).catch(() => {});
+}

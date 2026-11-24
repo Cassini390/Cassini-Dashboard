@@ -4,12 +4,12 @@
 from an Actisense **W2K-2** over Wi-Fi (**TCP, UDP or WebSocket**, **N2K ASCII** format).
 
 ```
-W2K-2 data server ──TCP/UDP, N2K ASCII──▶ server.js (bridge) ──SSE──▶ browser dashboard
-W2K-2 WebSocket ──────────────────────────────────────────────────▶ browser dashboard
+W2K-2 data server (TCP/UDP, N2K ASCII) ─┐
+W2K-2 built-in WebSocket ───────────────┴─▶ server.js (bridge) ──SSE──▶ browser dashboard
 ```
 
 Browsers cannot open raw TCP/UDP sockets, so `server.js` is a small bridge that
-does it for them. It has **no dependencies** – only Node.js (18+) is needed.
+does it for them, and it records the stored history and shares settings between devices. It has **no dependencies** – only Node.js (18+) is needed.
 
 ## Run
 
@@ -57,11 +57,14 @@ so Windows SmartScreen will warn on first run until it is signed with a code-sig
 
 | Source | How | Needs the bridge? |
 |---|---|---|
-| **WebSocket** | The browser connects straight to the gateway's built-in WebSocket (`ws://<gateway>/api/websocket`). No data server setup on the gateway. Chosen per device. | No - `public/index.html` can even be opened straight from disk (the OpenStreetMap map is not available then, see Map tiles) |
-| **TCP** / **UDP** | The bridge connects to a W2K-2 data server set to N2K ASCII and relays it to every browser. | Yes |
+| **WebSocket** | The bridge connects to the gateway's built-in WebSocket (`ws://<gateway>/api/websocket`). No data server setup on the gateway. | Yes, normally. When `public/index.html` is opened straight from disk the browser connects to the WebSocket itself instead (no stored history, and no OpenStreetMap map, see Map tiles) |
+| **TCP** / **UDP** | The bridge connects to a W2K-2 data server set to N2K ASCII. | Yes |
 | **Demo data** | Built-in simulator. | Yes |
 
 ## Connecting to a W2K-2
+
+The simplest is **WebSocket**: in **Settings → Data source** choose WebSocket and enter the gateway's address.
+Nothing needs setting up on the gateway. To use a data server instead:
 
 1. In the W2K-2 web interface, set one of its data servers to output **N2K ASCII**
    (TCP or UDP) and note the port.
@@ -73,18 +76,19 @@ so Windows SmartScreen will warn on first run until it is signed with a code-sig
    - **Find data servers on gateway** reads `GET /api/data_server_config` from the
      W2K-2 REST API and lists the servers so you can pick one.
 
-The connection is saved in `config.json` and restored on the next start. TCP
-reconnects automatically.
+The connection is saved in `config.json` and restored on the next start, and is the same for every device
+viewing the dashboard. TCP and WebSocket reconnect automatically. (Earlier versions connected each browser to the
+WebSocket separately; such a browser is moved over to Cassini's own connection the next time it opens the dashboard.)
 
 ## What it shows
 
 | Page | Contents |
 |---|---|
 | Overview | Compass, SOG, depth + history, wind, position, alerts, engines, batteries, tanks, environment |
-| My Dashboard | Your own layout: add any panels (instruments, chart, single values, gauges, history graphs, lists), drag to move, drag the corner to resize; shared by every device viewing the dashboard |
+| My Dashboard | Your own layout: add any panels (instruments, chart, single values, gauges, history graphs, lists), drag to move, drag the corner to resize in half-steps, ✎ to retitle a panel or rename the engine, battery or tank it shows; shared by every device viewing the dashboard |
 | Navigation | AIS targets (list with range, bearing, CPA and time to CPA, and markers on the chart), heading/COG/ROT, own-ship track plot, GNSS quality, waypoint (DTW, BTW, XTE, VMG, ETA), roll/pitch/rudder, depth & speed history |
 | Engines | Per engine: RPM, coolant, oil pressure, load, fuel rate, alternator, boost, gearbox, hours, warning flags |
-| Power & Tanks | Per battery: voltage, current, power, SOC, temperature, time remaining; tank levels; switch bank status |
+| Power & Tanks | Per battery: voltage, current, power, SOC, temperature, time remaining, with voltage, current and state-of-charge history; tank levels; switch bank status |
 | Environment | Apparent & true wind (true is calculated if not on the network), barometer + trend, temperatures, humidity |
 | Alarms | Active alarms; enable/disable each alarm, set its trigger threshold and severity; optional sound on new critical alarms |
 | Sources | Choose which source address to prioritise when several devices send the same data (automatic fail-over if it stops); custom names for engines, batteries and tanks |
@@ -101,10 +105,11 @@ reconnects automatically.
   before testing a new data stream. Settings, alarms and custom names are kept.
 - **Stored history:** the bridge decodes the stream itself and keeps depth, speed, wind, pressure,
   temperatures, battery, engine and tank values plus the vessel position in `history.json`: a sample
-  every 30 s for 24 hours and 10-minute averages for 30 days. Charts have Live / 24 h / 7 d / 30 d
-  buttons and draw the matching alarm thresholds as dashed lines; the Track history card loads the stored
-  track and draws it on the chart. History is cleared when the data source changes, and is not recorded
-  for a browser using the direct WebSocket source unless the bridge is also connected to the gateway.
+  every 30 s for 24 hours and 10-minute averages for 30 days. Charts have Live (30 min) / 24 h / 7 d / 30 d
+  buttons; the time axis always covers the whole period ending now, so a short recording fills only the right-hand
+  part, and the line breaks where nothing was recorded. Hover over a chart (or tap it) to read the time and value.
+  Charts draw the matching alarm thresholds as dashed lines, and percentages use a 0-100 % scale. The Track
+  history card loads the stored track and draws it on the chart. History is cleared when the data source changes.
 - **Map tiles:** the bridge fetches each map tile once and keeps it in `tile-cache/`, so areas you have
   already viewed keep working with no internet. Only viewed tiles are stored. Settings > Map tiles accepts another
   provider's tile address and credit if you do not want to use OpenStreetMap. The cache folder is safe to delete.

@@ -11,14 +11,15 @@ function syncMode() {
   form.port.parentElement.style.display = mode === 'ws' ? 'none' : '';
   $('#findServers').parentElement.style.display = mode === 'sim' ? 'none' : '';
   $('#findServers').style.display = mode === 'ws' ? 'none' : '';
-  $('#modeHint').textContent = mode === 'ws' ? 'This browser connects straight to the W2K-2\'s built-in WebSocket. No data server needs setting up on the gateway and no bridge program is involved. Each device viewing the dashboard makes its own connection.'
+  $('#modeHint').textContent = mode === 'ws' ? (standalone ? 'This browser connects straight to the W2K-2\'s built-in WebSocket. No data server needs setting up on the gateway. Stored history needs Cassini to be started with its launcher.'
+      : 'Cassini connects to the W2K-2\'s built-in WebSocket. No data server needs setting up on the gateway.')
     : mode === 'tcp' ? 'The bridge connects to a TCP data server on the W2K-2. Set that server\'s output format to "N2K ASCII" in the gateway\'s web interface.'
     : mode === 'udp' ? 'The bridge listens on this UDP port for data the W2K-2 broadcasts. Set that server\'s output format to "N2K ASCII". The address is only used to read gateway status.'
     : 'A built-in simulator generates realistic N2K ASCII data for a twin-engine vessel - useful for demos with no gateway attached.';
 }
 async function openSettings() {
   try { const j = await (await fetch('/api/config')).json(); form.mode.value = j.config.mode; form.host.value = j.config.host || ''; form.port.value = j.config.port || ''; } catch { /* no bridge */ }
-  if (direct || standalone) { form.mode.value = 'ws'; if (settings.ws && settings.ws.host) form.host.value = settings.ws.host; }
+  if (standalone) { form.mode.value = 'ws'; if (settings.ws && settings.ws.host) form.host.value = settings.ws.host; }
   for (const r of form.mode) if (r.value !== 'ws') r.disabled = standalone;   // TCP, UDP and demo data need the bridge program
   for (const k of ['speed', 'depth', 'temp', 'pressure', 'volume', 'depthRef', 'theme', 'brightness']) form[k].value = settings[k];
   $('#brightVal').textContent = `${settings.brightness}%`;
@@ -46,7 +47,7 @@ $('#testConn').onclick = async () => {
   const out = $('#testResult'), btn = $('#testConn');
   out.className = 'test-result'; out.textContent = 'Testing… (up to 4 seconds)'; out.hidden = false; btn.disabled = true;
   try {
-    const j = form.mode.value === 'ws' ? await testWebSocket(form.host.value.trim())
+    const j = standalone ? await testWebSocket(form.host.value.trim())
       : await (await fetch('/api/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: form.mode.value, host: form.host.value.trim(), port: form.port.value }) })).json();
     out.className = 'test-result ' + (j.ok ? 'good' : 'bad'); out.textContent = j.message;
   } catch { out.className = 'test-result bad'; out.textContent = 'The dashboard bridge did not answer - is server.js still running?'; }
@@ -110,8 +111,8 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const err = $('#settingsError');
   const wasDirect = direct, wsHost = form.host.value.trim();
-  if (form.mode.value === 'ws') {
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/.test(wsHost)) { err.textContent = 'Enter the gateway\'s address, for example 192.168.4.1.'; err.hidden = false; return; }
+  if (form.mode.value === 'ws' && !/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/.test(wsHost)) { err.textContent = 'Enter the gateway\'s address, for example 192.168.4.1.'; err.hidden = false; return; }
+  if (standalone) {   // opened from disk: there is no bridge, so this browser connects to the gateway itself
     settings.ws = { on: true, host: wsHost };
     if (!wasDirect || conn.host !== wsHost) startDirect(wsHost);
   } else {

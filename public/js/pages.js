@@ -14,7 +14,7 @@ const PAGES = {
         ['Log', () => fNm(get('log.total'))], ['Trip', () => fNm(get('log.trip'))]], 'wide')),
     card(['Depth', t(null, () => { const o = settings.depthRef === 'transducer' ? 0 : get('depth.offset'); return o == null ? '' : o < 0 ? `below keel (offset ${f(conv('depth', o), 1)} ${unit('depth')})` : o > 0 ? 'below waterline' : 'below transducer'; }, 'small')], 'c4',
       big(() => f(conv('depth', depthShown()), 1), () => unit('depth')),
-      spark('depth', (v) => conv('depth', v), 1, { invert: true, minSpan: 0.5, thr: thrDepth })),
+      spark('depth', (v) => conv('depth', v), 1, { invert: true, minSpan: 0.5, thr: thrDepth, unit: () => unit('depth') })),
     card('Wind', 'c4', h('div', 'center', windDial()),
       kv([['Apparent angle', () => fSide(get('wind.awa'))], ['True speed', () => fu(conv('speed', trueWind().tws), 1, unit('speed'))], ['True direction', () => fdeg(trueWind().twd)]])),
     card(['Position', t(null, () => get('gnss.method') || '', 'small')], 'c4',
@@ -54,8 +54,8 @@ const PAGES = {
       kv([['Roll', () => fSide(get('roll'))], ['Pitch', () => { const p = get('pitch'); return p == null ? '—' : `${Math.abs(p).toFixed(1)}° ${p >= 0 ? 'bow up' : 'bow down'}`; }], ['Rudder', () => fSide(get(`rudder.${ids('rudder')[0] ?? 0}`))]]), rudderBar()),
     card(['AIS targets', t(null, () => { const c = aisList().length; return c ? `${c} in range` : ''; }, 'small')], 'c12', aisTable()),
     trackCard(),
-    card('Depth history', 'c4', big(() => f(conv('depth', get('depth')), 1), () => unit('depth'), 'md'), spark('depth', (v) => conv('depth', v), 1, { invert: true, minSpan: 0.5, thr: thrDepth })),
-    card('Speed history', 'c4', big(() => fSpd(get('sog')), () => `${unit('speed')} SOG`, 'md'), spark('sog', (v) => conv('speed', v), 1, { zero: true, minSpan: 0.2 })),
+    card('Depth history', 'c4', big(() => f(conv('depth', get('depth')), 1), () => unit('depth'), 'md'), spark('depth', (v) => conv('depth', v), 1, { invert: true, minSpan: 0.5, thr: thrDepth, unit: () => unit('depth') })),
+    card('Speed history', 'c4', big(() => fSpd(get('sog')), () => `${unit('speed')} SOG`, 'md'), spark('sog', (v) => conv('speed', v), 1, { zero: true, minSpan: 0.2, unit: () => unit('speed') })),
   ]],
 
   engines: ['Engines', () => [
@@ -88,7 +88,7 @@ const PAGES = {
         h('div', null, h('div', 'meter', soc), t('hint', () => { const v = get(`bat.${id}.soc`); return v == null ? 'State of charge not reported' : `${v}% state of charge`; }, 'p')))),
       kv([['Power', () => { const v = get(`bat.${id}.v`), a = get(`bat.${id}.a`); return v == null || a == null ? '—' : `${(v * a).toFixed(0)} W`; }], ['Temperature', () => fTemp(get(`bat.${id}.temp`))],
         ['Time remaining', () => fDur(get(`bat.${id}.remaining`))], ['Health', () => fu(get(`bat.${id}.soh`), 0, '%')]]),
-      spark(`bat.${id}.v`, (v) => v, 2, { minSpan: 0.05, fit: true, thr: thrBat(id) }));
+      h('div', 'charts2', chartBox(`bat.${id}.v`), optional(`bat.${id}.a`, chartBox(`bat.${id}.a`)), optional(`bat.${id}.soc`, chartBox(`bat.${id}.soc`))));
     }, 'No battery data (PGN 127508) received yet.'),
     card('Tanks', 'c6', tankList()),
     card('Switches', 'c6', dyn(h('div', 'stack'), () => ids('switch'), (bank) => {
@@ -107,10 +107,10 @@ const PAGES = {
     card('Wind', 'c4', h('div', 'center', windDial())),
     card('Wind detail', 'c4', h('div', 'split', h('div', null, h('div', { class: 'tile' }, h('div', { class: 'label', text: 'Apparent' }), big(() => fSpd(get('wind.aws')), () => unit('speed'), 'md'), t('hint', () => fSide(get('wind.awa')), 'p'))),
       h('div', null, h('div', { class: 'tile' }, h('div', { class: 'label' }, t(null, () => (trueWind().calc ? 'True (calculated)' : 'True'))), big(() => fSpd(trueWind().tws), () => unit('speed'), 'md'), t('hint', () => fSide(trueWind().twa), 'p')))),
-      kv([['True direction', () => fdeg(trueWind().twd)], ['Beaufort', () => beaufort(trueWind().tws)]]), spark('tws', (v) => conv('speed', v), 1, { zero: true, minSpan: 0.5, thr: thrWind })),
+      kv([['True direction', () => fdeg(trueWind().twd)], ['Beaufort', () => beaufort(trueWind().tws)]]), spark('tws', (v) => conv('speed', v), 1, { zero: true, minSpan: 0.5, thr: thrWind, unit: () => unit('speed') })),
     card('Barometer', 'c4', big(() => f(get('pressure'), 1), 'hPa'),
       t('hint', () => { const a = H.pressure || []; if (a.length < 30) return 'Trend available after a few minutes of data'; const d = a[a.length - 1].v - a[0].v; return `${d > 0.1 ? 'Rising' : d < -0.1 ? 'Falling' : 'Steady'} (${d >= 0 ? '+' : ''}${d.toFixed(1)} hPa over ${Math.round((a[a.length - 1].t - a[0].t) / 60000)} min)`; }, 'p'),
-      spark('pressure', (v) => v, 1, { minSpan: 0.3 })),
+      spark('pressure', (v) => v, 1, { minSpan: 0.3, unit: 'hPa' })),
     card('Temperatures', 'c6', dyn(h('div'), () => ids('temp'), (id) => h('div', 'rowline', h('span', { class: 'name', text: tempName(id) }),
       h('span', 'val', t(null, () => fTemp(get(`temp.${id}`))), t(null, () => { const sp = get(`tempSet.${id}`); return sp == null ? '' : `set ${fTemp(sp, 0)}`; }, 'small'))), 'No temperature data received.')),
     card('Humidity & sea', 'c6', h('div', 'tiles',
