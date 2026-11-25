@@ -123,84 +123,171 @@ function panelCatalogue() {
 }
 let editMode = false;
 const ROW = 42, GAP = 16;
+
+// ---- layout: every panel has a position (x, y) and size (w, h) in grid cells, 24 columns wide.
+// Panels never overlap. Moving or resizing one pushes the panels in its way down, and everything floats up to close gaps
+// (like Grafana or Home Assistant dashboards), so the rest of the layout stays as arranged.
+const overlaps = (a, b) => a !== b && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+/** place items in reading order, each at the first free spot from the top (used to convert old layouts that had no positions) */
+function packLayout(items) {
+  const placed = [];
+  for (const it of items) {
+    it.w = clamp(it.w || 8, MIN_W, COLS); it.h = clamp(it.h || 6, MIN_H, MAX_H);
+    find: for (let y = 0; ; y++) for (let x = 0; x + it.w <= COLS; x++) { it.x = x; it.y = y; if (!placed.some((p) => overlaps(it, p))) break find; }
+    placed.push(it);
+  }
+}
+/** settle a layout: `fixed` (the panel being moved or resized) keeps its place; the others float up as far as they can and
+ *  move down below anything they would overlap. The fixed panel then floats up too if there is room above it. */
+function compactLayout(items, fixed) {
+  const placed = fixed ? [fixed] : [];
+  for (const it of [...items].sort((a, b) => a.y - b.y || a.x - b.x)) {
+    if (it === fixed) continue;
+    it.x = clamp(it.x, 0, COLS - it.w);
+    while (it.y > 0 && !placed.some((p) => overlaps({ ...it, y: it.y - 1 }, p))) it.y--;
+    while (placed.some((p) => overlaps(it, p))) it.y++;
+    placed.push(it);
+  }
+  if (fixed) {
+    while (fixed.y > 0 && !items.some((p) => p !== fixed && overlaps({ ...fixed, y: fixed.y - 1 }, p))) fixed.y--;
+    compactLayout(items);   // and close any gap that left behind (this only ever moves panels up, so nothing new overlaps)
+  }
+}
+const byPosition = (a, b) => a.y - b.y || a.x - b.x;
+
 function customPage() {
   if (!Array.isArray(settings.panels)) { settings.panels = DEFAULT_PANELS.map(([ty, a]) => newPanel(ty, a)); settings.panelGrid = 2; }
   if (settings.panelGrid !== 2) {   // layouts saved before the finer grid: same sizes in half-steps
     for (const p of settings.panels) { p.w = clamp((p.w || 4) * 2, MIN_W, COLS); p.h = clamp((p.h || 3) * 2, MIN_H, MAX_H); }
     settings.panelGrid = 2; saveSettings();
   }
+  settings.panels = settings.panels.filter((p) => PANELS[p.type]);
+  if (settings.panels.some((p) => !Number.isInteger(p.x) || !Number.isInteger(p.y))) packLayout(settings.panels);   // older layouts: order only
+  const was = JSON.stringify(settings.panels.map((p) => [p.x, p.y]));
+  compactLayout(settings.panels);   // no gaps (e.g. after a panel was removed on another device)
+  if (JSON.stringify(settings.panels.map((p) => [p.x, p.y])) !== was) saveSettings();
+  settings.panels.sort(byPosition);   // page order = reading order (also the order panels stack in on a phone)
   const grid = h('div', 'dash' + (editMode ? ' editing' : ''));
-  const saveOrder = () => { const by = Object.fromEntries(settings.panels.map((p) => [p.id, p])); settings.panels = [...grid.children].map((c) => by[c.dataset.id]).filter(Boolean); saveSettings(); };
+  const els = new Map();   // panel -> its element
+  const ghost = h('div', { class: 'p-ghost', 'aria-hidden': 'true' });
+  const metrics = () => { const r = grid.getBoundingClientRect(); return { left: r.left, top: r.top, colW: (grid.clientWidth - (COLS - 1) * GAP) / COLS }; };
+  const cellPos = (m, x, y) => ({ left: m.left + x * (m.colW + GAP), top: m.top + y * (ROW + GAP) });
+  const areaKey = (p) => `${p.x},${p.y},${p.w},${p.h}`;
+  const setArea = (el, p) => { el.style.gridColumn = `${p.x + 1} / span ${p.w}`; el.style.gridRow = `${p.y + 1} / span ${p.h}`; el.style.setProperty("--rows", p.h); el._area = areaKey(p); };
+  /** show a layout: panels whose place changed slide there from where they are drawn now (except `skip`, the one being dragged) */
+  function show(items, skip) {
+    const recs = [];
+    for (const it of items) { const el = els.get(it.src); if (!el || it.src === skip || el._area === areaKey(it)) continue; recs.push([el, it, el.getBoundingClientRect()]); }
+    if (!recs.length) return;
+    for (const [el, it] of recs) { el.style.transition = 'none'; el.style.transform = ''; setArea(el, it); }
+    const now = recs.map(([el]) => el.getBoundingClientRect());
+    recs.forEach(([el, , was], i) => { const dx = was.left - now[i].left, dy = was.top - now[i].top; el.style.transform = dx || dy ? `translate(${dx}px, ${dy}px)` : ''; });
+    void grid.offsetWidth;   // apply the starting offsets before animating them away
+    for (const [el] of recs) { el.style.transition = 'transform .18s ease'; el.style.transform = ''; }
+  }
+  // a working copy of the layout while a panel is being dragged or resized; written back to the settings on release
+  const snapshot = () => settings.panels.map((p) => ({ src: p, x: p.x, y: p.y, w: p.w, h: p.h }));
+  const commit = (items) => { for (const it of items) Object.assign(it.src, { x: it.x, y: it.y, w: it.w, h: it.h }); settings.panels.sort(byPosition); saveSettings(); };
+  const narrow = () => matchMedia('(max-width: 760px)').matches;   // phones: panels are stacked in one column, so there is nothing to drag into place
+
   for (const p of settings.panels) {
-    const def = PANELS[p.type]; if (!def) continue;
+    const def = PANELS[p.type];
     const built = def.build(p.arg), body = h('div', 'panel-body' + (def.list ? ' list' : ''));
     body.append(...(built && built.controls ? [built.el] : [].concat(built)));
     const move = h('button', { class: 'p-btn p-move', type: 'button', title: 'Drag to move (or focus and use the arrow keys)', 'aria-label': 'Move panel: drag, or use the arrow keys', text: '⠿' });
     const grip = h('div', { class: 'p-resize', title: 'Drag to resize (or focus and use the arrow keys)', tabindex: 0, role: 'button', 'aria-label': 'Resize panel: drag, or use the arrow keys' });
-    const el = h('section', { class: 'card panel', 'data-id': p.id, style: `grid-column: span ${p.w}; grid-row: span ${p.h}` },
-      h('h3', null, t('p-title', () => p.title || def.name(p.arg)), built && built.controls ? built.controls : null,
-        h('span', 'p-edit', move,
-          h('button', { class: 'p-btn', type: 'button', title: panelSubject(p) ? 'Rename' : 'Rename panel', 'aria-label': panelSubject(p) ? 'Rename' : 'Rename panel', text: '✎', onclick: () => openRename(p, def) }),
-          h('button', { class: 'p-btn', type: 'button', title: 'Remove panel', 'aria-label': 'Remove panel', text: '✕', onclick: () => {
-            const at = settings.panels.indexOf(p); settings.panels = settings.panels.filter((x) => x.id !== p.id); saveSettings(); buildPages();
-            toast(`"${p.title || def.name(p.arg)}" removed.`, 'info', 9000, h('button', { class: 'btn sm', type: 'button', text: 'Undo', onclick: () => { settings.panels.splice(Math.min(at, settings.panels.length), 0, p); saveSettings(); buildPages(); $('#toast').hidden = true; } }));
-          } }))), body, grip);
-    // move: drag the handle over another panel to take its place
-    move.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); move.setPointerCapture(e.pointerId); el.classList.add('dragging');
-      let lastUnder = null;
-      const onMove = (ev) => {
-        const hit = document.elementFromPoint(ev.clientX, ev.clientY), under = hit && hit.closest('.panel');
-        if (!under || under === el || under.parentNode !== grid) { lastUnder = null; return; }
-        if (under === lastUnder) return;
-        lastUnder = under;
-        const kids = [...grid.children];
-        if (kids.indexOf(el) < kids.indexOf(under)) under.after(el); else under.before(el);
-      };
-      // listen on the window, not the handle: moving the panel in the page ends the browser's pointer capture on the handle,
-      // so the handle would never hear the release and the new order would not be saved
-      const onUp = () => { removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onUp); el.classList.remove('dragging'); saveOrder(); };
-      addEventListener('pointermove', onMove); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
-    });
-    // resize: drag the corner grip; snaps to the grid
-    grip.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); grip.setPointerCapture(e.pointerId); el.classList.add('resizing');
-      const x0 = e.clientX, y0 = e.clientY, w0 = p.w, h0 = p.h, colW = (grid.clientWidth - (COLS - 1) * GAP) / COLS;
-      const onMove = (ev) => {
-        p.w = clamp(Math.round(w0 + (ev.clientX - x0) / (colW + GAP)), MIN_W, COLS); p.h = clamp(Math.round(h0 + (ev.clientY - y0) / (ROW + GAP)), MIN_H, MAX_H);
-        el.style.gridColumn = `span ${p.w}`; el.style.gridRow = `span ${p.h}`;
-      };
-      const onUp = () => { removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onUp); el.classList.remove('resizing'); saveSettings(); };
-      addEventListener('pointermove', onMove); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
-    });
-    move.addEventListener('keydown', (e) => {
-      const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp', fwd = e.key === 'ArrowRight' || e.key === 'ArrowDown';
-      if (!back && !fwd) return;
+    const head = h('h3', null, t('p-title', () => p.title || def.name(p.arg)), built && built.controls ? built.controls : null,
+      h('span', 'p-edit', move,
+        h('button', { class: 'p-btn', type: 'button', title: panelSubject(p) ? 'Rename' : 'Rename panel', 'aria-label': panelSubject(p) ? 'Rename' : 'Rename panel', text: '✎', onclick: () => openRename(p, def) }),
+        h('button', { class: 'p-btn', type: 'button', title: 'Remove panel', 'aria-label': 'Remove panel', text: '✕', onclick: () => {
+          const before = settings.panels.map((x) => ({ ...x }));
+          settings.panels = settings.panels.filter((x) => x.id !== p.id); compactLayout(settings.panels); saveSettings(); buildPages();
+          toast(`"${p.title || def.name(p.arg)}" removed.`, 'info', 9000, h('button', { class: 'btn sm', type: 'button', text: 'Undo', onclick: () => { settings.panels = before; saveSettings(); buildPages(); $('#toast').hidden = true; } }));
+        } })));
+    const el = h('section', { class: 'card panel', 'data-id': p.id }, head, body, grip);
+    setArea(el, p); els.set(p, el);
+
+    // move: drag the panel by its title bar (or ⠿). It follows the pointer; the outline shows where it will land.
+    head.addEventListener('pointerdown', (e) => {
+      if (!editMode || e.button !== 0 || narrow() || (e.target.closest('button, input, select, a') && !e.target.closest('.p-move'))) return;
       e.preventDefault();
-      const sib = back ? el.previousElementSibling : el.nextElementSibling;
-      if (sib) { if (back) sib.before(el); else sib.after(el); saveOrder(); move.focus(); }
+      const items = snapshot(), me = items.find((it) => it.src === p), m0 = metrics(), cell = cellPos(m0, p.x, p.y);
+      const grabX = e.clientX - cell.left, grabY = e.clientY - cell.top;
+      let started = false, drop = { x: p.x, y: p.y };
+      const onMove = (ev) => {
+        if (!started) { if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return; started = true; el.classList.add('dragging'); grid.append(ghost); }
+        const m = metrics();
+        // where the pointer would put the panel, settled against the layout as it was before the drag
+        const want = { x: clamp(Math.round((ev.clientX - grabX - m.left) / (m.colW + GAP)), 0, COLS - me.w), y: Math.max(0, Math.round((ev.clientY - grabY - m.top) / (ROW + GAP))) };
+        const work = items.map((it) => ({ ...it, x: it.src.x, y: it.src.y }));
+        const mine = work.find((it) => it.src === p); Object.assign(mine, want);
+        compactLayout(work, mine);
+        work.forEach((wk, i) => { items[i].x = wk.x; items[i].y = wk.y; });
+        drop = { x: mine.x, y: mine.y };
+        setArea(ghost, mine); show(items, p); setArea(el, mine);
+        const c = cellPos(m, mine.x, mine.y);
+        el.style.transition = 'none'; el.style.transform = `translate(${ev.clientX - grabX - c.left}px, ${ev.clientY - grabY - c.top}px)`;
+      };
+      const onUp = () => {
+        removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onUp);
+        if (!started) return;
+        Object.assign(me, drop); ghost.remove(); el.classList.remove('dragging');
+        el.style.transition = 'transform .18s ease'; el.style.transform = '';   // glide into place
+        commit(items);
+      };
+      addEventListener('pointermove', onMove); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
     });
-    grip.addEventListener('keydown', (e) => {
+    // resize: drag the bottom-right corner. The panel follows the pointer; the outline shows the size it will snap to.
+    grip.addEventListener('pointerdown', (e) => {
+      if (!editMode || e.button !== 0 || narrow()) return;
+      e.preventDefault(); e.stopPropagation();
+      const items = snapshot(), me = items.find((it) => it.src === p), r0 = el.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+      el.classList.add('resizing'); setArea(ghost, me); grid.append(ghost);
+      const onMove = (ev) => {
+        const m = metrics(), wpx = Math.max(60, r0.width + ev.clientX - x0), hpx = Math.max(60, r0.height + ev.clientY - y0);
+        el.style.width = `${wpx}px`; el.style.height = `${hpx}px`;
+        const w = clamp(Math.round((wpx + GAP) / (m.colW + GAP)), MIN_W, COLS - p.x), hh = clamp(Math.round((hpx + GAP) / (ROW + GAP)), MIN_H, MAX_H);
+        const work = items.map((it) => ({ ...it, x: it.src.x, y: it.src.y, w: it.src === p ? w : it.src.w, h: it.src === p ? hh : it.src.h }));
+        const mine = work.find((it) => it.src === p); compactLayout(work, mine);
+        work.forEach((wk, i) => Object.assign(items[i], { x: wk.x, y: wk.y, w: wk.w, h: wk.h }));
+        setArea(ghost, me); show(items, p); setArea(el, me);
+      };
+      const onUp = () => {
+        removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onUp);
+        el.classList.remove('resizing'); ghost.remove(); el.style.width = el.style.height = '';
+        commit(items);
+      };
+      addEventListener('pointermove', onMove); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
+    });
+    // keyboard: arrow keys on ⠿ move the panel one cell, on the corner grip they change its size
+    const nudge = (e, change) => {
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       if (!d) return;
       e.preventDefault();
-      p.w = clamp(p.w + d[0], MIN_W, COLS); p.h = clamp(p.h + d[1], MIN_H, MAX_H);
-      el.style.gridColumn = `span ${p.w}`; el.style.gridRow = `span ${p.h}`; saveSettings();
-    });
+      const items = snapshot(), me = items.find((it) => it.src === p);
+      change(me, d); compactLayout(items, me); show(items); commit(items);
+    };
+    move.addEventListener('keydown', (e) => nudge(e, (me, [dx, dy]) => { me.x = clamp(me.x + dx, 0, COLS - me.w); me.y = Math.max(0, me.y + dy); }));
+    grip.addEventListener('keydown', (e) => nudge(e, (me, [dx, dy]) => { me.w = clamp(me.w + dx, MIN_W, COLS - me.x); me.h = clamp(me.h + dy, MIN_H, MAX_H); }));
     grid.append(el);
   }
   if (!grid.children.length) grid.append(h('div', { class: 'empty dash-empty', text: 'This dashboard is empty. Choose "Edit layout", then "Add panel".' }));
   const bar = h('div', 'dash-bar',
-    h('span', { class: 'hint', text: editMode ? 'Drag ⠿ to move a panel, drag its bottom-right corner to resize, ✕ to remove. The layout is shared with every device.' : '' }),
+    h('span', { class: 'hint', text: editMode ? (narrow() ? 'On a phone the panels are stacked: use ⠿ and the arrow keys, or a wider screen, to arrange them. ✕ removes a panel.'
+      : 'Drag a panel by its title bar to move it, drag its bottom-right corner to resize, ✕ to remove. The layout is shared with every device.') : '' }),
     editMode ? h('button', { class: 'btn sm', type: 'button', text: 'Reset layout', onclick: () => { delete settings.panels; saveSettings(); buildPages(); } }) : null,
     editMode ? h('button', { class: 'btn sm', type: 'button', text: '+ Add panel', onclick: openAddPanel }) : null,
-    h('button', { class: 'btn sm' + (editMode ? ' primary' : ''), type: 'button', text: editMode ? 'Done' : 'Edit layout', onclick: () => { if (editMode && grid.querySelector('.panel')) saveOrder(); editMode = !editMode; buildPages(); } }));   // Done keeps the order as shown
+    h('button', { class: 'btn sm' + (editMode ? ' primary' : ''), type: 'button', text: editMode ? 'Done' : 'Edit layout', onclick: () => { editMode = !editMode; buildPages(); } }));
   return [bar, grid];
 }
 function openAddPanel() {
   let dlg = $('#addPanel');
   if (!dlg) { dlg = h('dialog', { id: 'addPanel' }); document.body.append(dlg); applyTheme(); }
-  const add = (ty, a) => { settings.panels.push(newPanel(ty, a)); saveSettings(); dlg.close(); buildPages(); const last = $('#page-custom .dash').lastElementChild; if (last) last.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+  const add = (ty, a) => {
+    const p = newPanel(ty, a); p.x = 0; p.y = settings.panels.reduce((m, q) => Math.max(m, q.y + q.h), 0);   // new panels go at the bottom
+    settings.panels.push(p); saveSettings(); dlg.close(); buildPages();
+    const el = $(`#page-custom .panel[data-id="${p.id}"]`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
   dlg.replaceChildren(h('div', 'add-wrap', h('h2', { text: 'Add panel' }),
     Object.entries(panelCatalogue()).map(([group, items]) => h('fieldset', null, h('legend', { text: group }),
       h('div', 'add-list', items.map(([ty, a]) => h('button', { class: 'btn sm', type: 'button', text: PANELS[ty].name(a), onclick: () => add(ty, a) }))))),

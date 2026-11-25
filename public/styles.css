@@ -362,7 +362,7 @@ input.sw:checked::after { left: 26px; }
 /* ================================================================== My Dashboard: panel grid, panel contents, edit mode */
 .dash-bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: 30px; }
 .dash-bar .hint { margin-right: auto; }
-.dash { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); grid-auto-rows: 42px; grid-auto-flow: dense; gap: 16px; }
+.dash { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); grid-auto-rows: 42px; gap: 16px; }
 /* rename dialog (My Dashboard) */
 dialog#renamePanel { width: min(480px, calc(100vw - 24px)); }
 .stack-label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text-2); }
@@ -393,8 +393,12 @@ dialog#renamePanel { width: min(480px, calc(100vw - 24px)); }
 .p-move { cursor: grab; touch-action: none; font-size: 22px; }
 .dash.editing .p-resize { display: block; position: absolute; right: 0; bottom: 0; width: 40px; height: 40px; cursor: nwse-resize; touch-action: none; z-index: 1001;
   background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); border-bottom-right-radius: 13px; opacity: .85; }
-.panel.dragging { opacity: .55; outline: 2px solid var(--accent) !important; }
-.panel.resizing { outline: 2px solid var(--accent) !important; user-select: none; }
+.panel.dragging { z-index: 30; opacity: .92; box-shadow: 0 18px 40px rgba(0, 0, 0, .35); cursor: grabbing; outline: 2px solid var(--accent) !important; }
+/* where a dragged or resized panel will land */
+.p-ghost { border: 2px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--accent) 8%, transparent); pointer-events: none; z-index: 0; }
+.dash.editing .panel > h3 { cursor: grab; user-select: none; }
+.dash.editing .panel > h3 :is(button, input, select, a) { cursor: pointer; }
+.panel.resizing { z-index: 30; outline: 2px solid var(--accent) !important; user-select: none; }
 .add-wrap { padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; }
 .add-list { display: flex; flex-wrap: wrap; gap: 8px; }
 dialog#addPanel { width: min(760px, calc(100vw - 24px)); }
@@ -470,7 +474,8 @@ svg.ageing { opacity: .45; }
   main { padding: 12px 12px 32px; }
   .page { gap: 12px; }
   .card, .c3, .c4, .c5, .c6, .c7, .c8, .c12 { grid-column: span 12; }
-  .dash > .panel { grid-column: 1 / -1 !important; }
+  .dash > .panel { grid-column: 1 / -1 !important; grid-row: auto / span var(--rows, 6) !important; }   /* phones: one column, in reading order */
+  .dash .p-resize { display: none !important; }
   .topbar { flex-wrap: wrap; gap: 8px 12px; }
   .topbar h1, .product, .clock { display: none; }
   .big .num { font-size: 38px; }

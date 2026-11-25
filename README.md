@@ -85,7 +85,7 @@ WebSocket separately; such a browser is moved over to Cassini's own connection t
 | Page | Contents |
 |---|---|
 | Overview | Compass, SOG, depth + history, wind, position, alerts, engines, batteries, tanks, environment |
-| My Dashboard | Your own layout: add any panels (instruments, chart, single values, gauges, history graphs, lists), drag to move, drag the corner to resize in half-steps, ✎ to retitle a panel or rename the engine, battery or tank it shows; shared by every device viewing the dashboard |
+| My Dashboard | Your own layout: add any panels (instruments, chart, single values, gauges, history graphs, lists), drag a panel by its title bar to move it (panels in the way move down and gaps close up, with an outline showing where it will land), drag the corner to resize in half-steps, arrow keys on ⠿ or the corner for keyboard use, ✎ to retitle a panel or rename the engine, battery or tank it shows; shared by every device viewing the dashboard |
 | Navigation | AIS targets (list with range, bearing, CPA and time to CPA, and markers on the chart), heading/COG/ROT, own-ship track plot, GNSS quality, waypoint (DTW, BTW, XTE, VMG, ETA), roll/pitch/rudder, depth & speed history |
 | Engines | Per engine: RPM, coolant, oil pressure, load, fuel rate, alternator, boost, gearbox, hours, warning flags |
 | Power & Tanks | Per battery: voltage, current, power, SOC, temperature, time remaining, with voltage, current and state-of-charge history; tank levels; switch bank status |
